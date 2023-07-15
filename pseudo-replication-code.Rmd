@@ -1,0 +1,1848 @@
+#library
+```{r}
+library(RSkittleBrewer)
+library(polyester)
+library(ggplot2)
+library(ggfortify)
+library(ggforce)
+library(dplyr)
+library(sva)
+library(FactoMineR)
+library(factoextra)
+library(edgeR)
+library(grid)
+library(gridExtra)
+library(ggpubr)
+library(vegan)
+library(openxlsx)
+```
+#read data
+```{r}
+all_cols=read.xlsx("pr_smp.xlsx",sheet=2)
+all_cats=read.xlsx("pr_smp.xlsx",sheet=1)
+# Real Data 1
+c1.1 = read.table("C:/Users/33143/Documents/pseudo/GSM1289430_Control_1_rep1.txt")
+c1.2 = read.table("C:/Users/33143/Documents/pseudo/GSM1289430_Control_1_rep2.txt")
+
+c2.1 = read.table("C:/Users/33143/Documents/pseudo/GSM1289431_Control_2_rep1.txt")
+c2.2 = read.table("C:/Users/33143/Documents/pseudo/GSM1289431_Control_2_rep2.txt")
+
+c3.1 = read.table("C:/Users/33143/Documents/pseudo/GSM1289432_Control_3_rep1.txt")
+c3.2 = read.table("C:/Users/33143/Documents/pseudo/GSM1289432_Control_3_rep2.txt")
+
+t1.1 = read.table("C:/Users/33143/Documents/pseudo/GSM1289433_Treated_1_rep1.txt")
+t1.2 = read.table("C:/Users/33143/Documents/pseudo/GSM1289433_Treated_1_rep2.txt")
+
+t2.1 = read.table("C:/Users/33143/Documents/pseudo/GSM1289434_Treated_2_rep1.txt")
+t2.2 = read.table("C:/Users/33143/Documents/pseudo/GSM1289434_Treated_2_rep2.txt")
+
+t3.1 = read.table("C:/Users/33143/Documents/pseudo/GSM1289435_Treated_3_rep1.txt")
+t3.2 = read.table("C:/Users/33143/Documents/pseudo/GSM1289435_Treated_3_rep2.txt")
+
+
+GSE53334 <- Reduce(function(dtf1,dtf2) left_join(dtf1,dtf2,by="V1"), list(c1.1,c1.2,c2.1,c2.2,c3.1,c3.2,
+                                                                          t1.1,t1.2,t2.1,t2.2,t3.1,t3.2))
+colnames(GSE53334) <- c('Gene','Control1.1','Control1.2','Control2.1','Control2.2','Control3.1','Control3.2',
+                        'Treated1.1','Treated1.2','Treated2.1','Treated2.2','Treated3.1','Treated3.2')
+
+pcg = prcomp(t(GSE53334[,2:ncol(GSE53334)]), scale.=FALSE)
+autoplot(pcg, colour=c(rep("red",6),rep("blue",6)))
+
+
+# Real Data 2
+GSE122138 <- read.csv("C:/Users/33143/Documents/pseudo/GSE122138_Pup_exposure_VNO_pS6_read_counts.csv")
+pcg = prcomp(t(GSE122138[,2:ncol(GSE122138)]), scale.=FALSE)
+autoplot(pcg, colour=c(rep("red",3),rep("blue",3)))
+
+
+# Real Data 3
+GSE106417 <- read.table("C:/Users/33143/Documents/pseudo/GSE106417_mm10_GCB_readCount_RNAseq_STAR-featureCount_NoZero_WT-KO.txt")
+pcg = prcomp(t(GSE106417), scale.=FALSE)
+autoplot(pcg, colour=c(rep("red",3),rep("blue",3)))
+```
+#PCA plots
+```{r}
+
+#### pseudoreplication function
+p.rep <- function(df, pdata, batch_p_rep){
+  pdata <- as.data.frame(pdata)
+  b1c1 <- which(pdata$class == -1 & pdata$batch == -1)
+  b1c2 <- which(pdata$class == 1 & pdata$batch == -1)
+  b2c1 <- which(pdata$class == -1 & pdata$batch == 1)
+  b2c2 <- which(pdata$class == 1 & pdata$batch == 1)
+  batch_classes <- list(b1c1,b1c2,b2c1,b2c2)
+  bc_sizes <- lapply(batch_classes, length) %>% unlist()
+  
+  if (length(unique(bc_sizes)) == 1) {
+    return(list(df=df, pdata=pdata))
+  }
+  out_df <- df
+  out_pdata <- pdata
+  temp_samples1 <- c()
+  temp_samples2 <- c()
+  #### Oversample classbatch 1
+  if (bc_sizes[2] < bc_sizes[1]){
+    add_samples1 <- bc_sizes[1] - bc_sizes[2] # no. of samples to oversample
+    # sample minority class
+    rand_samples1 <- sample(b1c2, add_samples1, replace=TRUE)
+    temp_samples1 <- df[,rand_samples1]
+    # Create effect factors
+    add_pdata1 <- data.frame(class=rep(1,add_samples1), batch=rep(-1,add_samples1))
+  } else if (bc_sizes[1] < bc_sizes[2]){
+    add_samples1 <- bc_sizes[2] - bc_sizes[1] # no. of samples to oversample
+    # sample minority class
+    rand_samples1 <- sample(b1c1, add_samples1, replace=TRUE)
+    temp_samples1 <- df[,rand_samples1]
+    # Create effect factors
+    add_pdata1 <- data.frame(class=rep(-1,add_samples1), batch=rep(-1,add_samples1))
+  }
+  
+  #### Oversample classbatch 2
+  if (bc_sizes[4] < bc_sizes[3]){
+    add_samples2 <- bc_sizes[3] - bc_sizes[4] # no. of samples to oversample
+    # sample minority class
+    rand_samples2 <- sample(b2c2, add_samples2, replace=TRUE)
+    temp_samples2 <- df[,rand_samples2]
+    # Create effect factors
+    add_pdata2 <- data.frame(class=rep(1,add_samples2), batch=rep(1,add_samples2))
+    
+  } else if (bc_sizes[3] < bc_sizes[4]){
+    add_samples2 <- bc_sizes[4] - bc_sizes[3] # no. of samples to oversample
+    # sample minority class
+    rand_samples2 <- sample(b2c1, add_samples2, replace=TRUE)
+    temp_samples2 <- df[,rand_samples2]
+    # Create effect factors
+    add_pdata2 <- data.frame(class=rep(-1,add_samples2), batch=rep(1,add_samples2))
+  }
+  if (!is.null(temp_samples1) & !is.null(temp_samples2)){
+  # Combine new samples and effect factors with original
+  add_df = cbind(temp_samples1, temp_samples2)
+  out_df = cbind(df, add_df)
+  
+  add_pdata = rbind(add_pdata1, add_pdata2)
+  out_pdata = rbind(pdata, add_pdata)
+  }
+  if (batch_p_rep == TRUE){
+    b1c1 <- which(out_pdata$class == -1 & out_pdata$batch == -1)
+    b1c2 <- which(out_pdata$class == 1 & out_pdata$batch == -1)
+    b2c1 <- which(out_pdata$class == -1 & out_pdata$batch == 1)
+    b2c2 <- which(out_pdata$class == 1 & out_pdata$batch == 1)
+    batch_classes <- list(b1c1,b1c2,b2c1,b2c2)
+    bc_sizes <- lapply(batch_classes, length) %>% unlist()
+    
+    # create list of class & batch factors for each class-batch
+    cblist <- list(c(-1,-1), c(1,-1), c(-1,1), c(1,1))
+    if ((bc_sizes[1] != bc_sizes[2]) | (bc_sizes[3] != bc_sizes[4])){
+      stop("Class sizes are not balanced.")
+    } else if (length(unique(bc_sizes)) == 1){
+      return(list(df=out_df, pdata=out_pdata))
+      } else {
+        ### oversample batches
+        # identify smaller batch
+        smaller_batch <- which(bc_sizes == min(bc_sizes))
+        # get smaller batch indexes
+        smaller_batch_inds1 <- batch_classes[[smaller_batch[1]]]
+        smaller_batch_inds2 <- batch_classes[[smaller_batch[2]]]
+        
+        # no. of samples to replicate
+        rep_samples <- max(bc_sizes) - min(bc_sizes)
+        smaller_batch_rep1 <- sample(smaller_batch_inds1, rep_samples, replace=TRUE)
+        smaller_batch_rep2 <- sample(smaller_batch_inds2, rep_samples, replace=TRUE)
+        
+        # replicate samples
+        temp_batch_samples1 <- out_df[,smaller_batch_rep1]
+        temp_batch_samples2 <- out_df[,smaller_batch_rep2]
+        new_batch_df <- cbind(temp_batch_samples1, temp_batch_samples2)
+
+        out_df <- cbind(out_df, new_batch_df)
+        
+        # create new pdata to add to current pdata
+        batch_add_pdata1 <- data.frame(class=rep(cblist[[smaller_batch[1]]][1],rep_samples), batch=rep(cblist[[smaller_batch[1]]][2],rep_samples))
+        batch_add_pdata2 <- data.frame(class=rep(cblist[[smaller_batch[2]]][1],rep_samples), batch=rep(cblist[[smaller_batch[2]]][2],rep_samples))
+        out_pdata <- rbind(out_pdata, batch_add_pdata1, batch_add_pdata2)
+        }
+  }
+  colnames(out_df) <- seq(ncol(out_df))
+  return(list(df=out_df, pdata=out_pdata))
+}
+
+
+###################### polyester
+
+########## generate data with batch and class effect and test
+# get parameters for each real dataset
+counts1 = as.matrix(GSE53334[,2:ncol(GSE53334)])
+counts2 = as.matrix(GSE122138[,2:ncol(GSE122138)])
+counts3 = GSE106417
+params1 = get_params(counts1)
+params2 = get_params(counts2)
+params3 = get_params(counts3)
+
+# Create batch imbalance simulation factor
+if (batch_imbal == TRUE){ # regenerate batch and class factors if simulating batch size imbalance
+  batch = c(rep(-1,batch_split[1]*2), rep(1,batch_split[2]*2))
+  class = c(rep(c(-1,1),each=batch_split[1]), rep(c(-1,1),each=batch_split[2]))
+}
+
+# Create pheno data
+pdata = cbind(class,batch)
+pdata = pdata[sample(nrow(pdata),replace=FALSE),]
+class = pdata[,1]
+batch = pdata[,2]
+
+# Create coefficients for class and batch
+#gcoeffs = c(rnorm(n=CEP*m, mean=0, sd=1), rep(0, m-(CEP*m))) %>% sample() %>% cbind()
+#bcoeffs = c(rnorm(n=BEP*m, mean=0, sd=1), rep(0, m-(BEP*m))) %>% sample() %>% cbind()
+#coeffs = cbind(bcoeffs,gcoeffs)
+#colnames(coeffs) = c('batch','class')
+#both=length(which(coeffs[,'class'] != 0 & coeffs[,'batch'] != 0));both
+#ce_only=length(which(coeffs[,'class'] != 0 & coeffs[,'batch'] == 0));ce_only
+#be_only=length(which(coeffs[,'class'] == 0 & coeffs[,'batch'] != 0));be_only
+#none=length(which(coeffs[,'class'] == 0 & coeffs[,'batch'] == 0));none
+
+if (BEP < CEP){
+  gcoeffs = c(rnorm(n=CEP*m, mean=0, sd=1), rep(0, m-(CEP*m))) %>% cbind()
+  shared_BEP = BEP - 0.1
+  bcoeffs = c(rnorm(n=shared_BEP*m, mean=0, sd=1), rep(0, (1-BEP)*m), rnorm(n=0.1*m, mean=0, sd=1)) %>% cbind()
+}
+if (BEP >= CEP){
+  gcoeffs = c(rnorm(n=CEP*m, mean=0, sd=1), rep(0, m-(CEP*m))) %>% cbind()
+  shared_CEP = CEP - 0.1
+  bcoeffs = c(rep(0,0.1*m), rnorm(n=BEP*m, mean=0, sd=1), rep(0, m-((BEP+0.1)*m))) %>% cbind()
+}
+coeffs = cbind(bcoeffs,gcoeffs)
+coeffs = coeffs[sample(1:nrow(coeffs)),]
+colnames(coeffs) = c('batch','class')
+both=length(which(coeffs[,'class'] != 0 & coeffs[,'batch'] != 0));print(paste0('Genes affected by CEP and BEP: ',both))
+ce_only=length(which(coeffs[,'class'] != 0 & coeffs[,'batch'] == 0));print(paste0('Genes affected by CEP only: ',ce_only))
+be_only=length(which(coeffs[,'class'] == 0 & coeffs[,'batch'] != 0));print(paste0('Genes affected by BEP only: ',be_only))
+none=length(which(coeffs[,'class'] == 0 & coeffs[,'batch'] == 0));print(paste0('Genes unaffected: ',none))
+
+### Create "No batch" datasets for each real-world dataset
+mod = model.matrix(~-1 + class)
+
+nobatch1 = create_read_numbers(params1$mu,params1$fit,params1$p0, m=m, n=n,
+                               beta=gcoeffs, mod=mod)
+nobatch2 = create_read_numbers(params2$mu,params2$fit,params2$p0, m=m, n=n,
+                               beta=gcoeffs, mod=mod)
+nobatch3 = create_read_numbers(params3$mu,params3$fit,params3$p0, m=m, n=n,
+                               beta=gcoeffs, mod=mod)
+
+### Log-transform the data
+nobatch1_log <- log2(nobatch1)
+nobatch1_log[is.infinite(nobatch1_log)] <- 0
+nobatch2_log <- log2(nobatch2)
+nobatch2_log[is.infinite(nobatch2_log)] <- 0
+nobatch3_log <- log2(nobatch3)
+nobatch3_log[is.infinite(nobatch3_log)] <- 0
+
+
+### Create "Batch" datasets for each real-world dataset
+mod = model.matrix(~-1 + batch + class)
+data1 = create_read_numbers(params1$mu,params1$fit,
+                            params1$p0,m=dim(counts1)[1],n=dim(counts1)[2],
+                            beta=coeffs,mod=mod)
+data2 = create_read_numbers(params2$mu,params2$fit,
+                            params2$p0,m=dim(counts2)[1],n=dim(counts3)[2],
+                            beta=coeffs,mod=mod)
+data3 = create_read_numbers(params3$mu,params3$fit,
+                            params3$p0,m=dim(counts3)[1],n=dim(counts3)[2],
+                            beta=coeffs,mod=mod)
+
+
+
+### Log-transform the data
+data1_log <- log2(data1)
+data1_log[is.infinite(data1_log)] <- 0
+data2_log <- log2(data2)
+data2_log[is.infinite(data2_log)] <- 0
+data3_log <- log2(data3)
+data3_log[is.infinite(data3_log)] <- 0
+
+################################## Batch effect correction for data1
+batch_correct <- function(log_df, pdata, p_rep=FALSE, batch_p_rep=batch_p_rep){
+  if (p_rep == FALSE){
+    pheno = as.data.frame(pdata)
+    edata = log_df
+  } else if (p_rep == TRUE){
+    pseudoreplicate = p.rep(log_df, pdata, batch_p_rep=batch_p_rep)
+    pheno = pseudoreplicate[['pdata']]
+    edata = pseudoreplicate[['df']]
+  }
+  
+  # perform ComBat
+  batch = pheno$batch
+  class = pheno$class
+  combat_edata = ComBat(edata, batch=batch, mod=NULL)
+  
+  # perform ComBat (cov)
+  mod = model.matrix(~as.factor(pheno$class), data=pheno)
+  combat_edata_cov = ComBat(edata, batch=batch, mod=mod)
+  
+  # perform CS-ComBat
+  tempdf = edata
+  colnames(tempdf) = seq(ncol(tempdf))
+  class1 = tempdf[,class == -1]
+  class2 = tempdf[,class == 1]
+  
+  cs.class1 = ComBat(class1, batch = as.factor(batch[class==-1]))
+  cs.class2 = ComBat(class2, batch = as.factor(batch[class==1]))
+  cscombat_edata = cbind(cs.class1, cs.class2)
+  cscombat_edata = cscombat_edata[,order(as.numeric(colnames(cscombat_edata)))]
+  
+  # perform Ratio A
+  ratioa_edata = t(bapred::ratioa(t(exp(edata)), as.factor(batch))$xadj)
+  ratioa_edata[which(is.na(ratioa_edata))] = 0
+  ratioa_edata = log(ratioa_edata,2)
+  
+  # perform Ratio G
+  ratiog_edata = t(bapred::ratiog(t(exp(edata)), as.factor(batch))$xadj)
+  ratiog_edata[which(is.na(ratiog_edata))] = 0
+  ratiog_edata = log(ratiog_edata,2)
+  
+  # perform BMC
+  bmc_edata = t(bapred::meancenter(t(edata), as.factor(batch))$xadj)
+  
+  
+  # perform SVA
+  mod0 = model.matrix(~1,data=pheno)
+  
+  # filter and remove features that are completely 0
+  exp_mean <- apply(edata,1,mean)
+  filter_features <- which(exp_mean == 0)
+  if(length(filter_features) > 0){
+    f.edata = edata[-filter_features,]
+  } else {
+    f.edata = edata
+  }
+  n.sv = num.sv(f.edata,mod,method="leek")
+  svobj = sva(f.edata,mod,mod0,n.sv=n.sv) # no, of surrogate variables (1 batch)
+  
+  X = cbind(mod, svobj$sv)
+  Hat = solve(t(X) %*% X) %*% t(X)# %*% is matrix multiplication
+  beta = (Hat %*% t(f.edata))
+  rm(Hat)
+  gc()
+  P = ncol(mod)
+  sva_edata = f.edata - t(as.matrix(X[,-c(1:P)]) %*% beta[-c(1:P),])
+    
+
+  out_list = list(combat=combat_edata,combatcov=combat_edata_cov,cscombat=cscombat_edata,
+                  ratioa=ratioa_edata,ratiog=ratiog_edata,bmc=bmc_edata,sva=sva_edata)
+  if (p_rep == TRUE){
+    out_list = lapply(out_list, function(x) x[,1:ncol(log_df)])
+  }
+  
+  return(out_list)
+}
+bc.data1 <- batch_correct(data1_log, pdata, p_rep=p_rep, batch_p_rep)
+bc.data2 <- batch_correct(data2_log, pdata, p_rep=p_rep, batch_p_rep)
+bc.data3 <- batch_correct(data3_log, pdata, p_rep=p_rep, batch_p_rep)
+################################################################
+
+##### plot PCA
+type = "t" # ellipse type: "t" or "norm"
+
+
+extract_legend <- function(my_ggp) {
+  step1 <- ggplot_gtable(ggplot_build(my_ggp))
+  step2 <- which(sapply(step1$grobs, function(x) x$name) == "guide-box")
+  step3 <- step1$grobs[[step2]]
+  return(step3)
+}
+nobatch_data <- list(nobatch1_log, nobatch2_log, nobatch3_log)
+batch_data <- list(data1_log, data2_log, data3_log)
+
+PCA_all <- function(bc.list,batch,class,data.num, type="t", nobatch_list=nobatch_data, batch_list=batch_data){
+  nobatch_df = nobatch_list[[data.num]]
+  batch_df = batch_list[[data.num]]
+  pca_df = prcomp(t(nobatch_df), scale.=FALSE)
+  pca_df = pca_df$x
+  pca_df = as.data.frame(pca_df)
+  pca_df$batch <- as.factor(batch)
+  pca_df$class <- as.factor(class)
+  nobatch=ggplot(pca_df, aes(x = PC1, y = PC2, shape=class, fill=batch),colour='black', shape=21) +
+    stat_ellipse(geom="polygon", alpha=0.2, aes(color=batch,fill=batch),
+                 show.legend = FALSE, type=type) +
+    geom_point(size=2) +
+    scale_shape_manual(values=c(21,24)) + labs(x="", y="", title="No batch") +
+    theme_bw() + 
+    theme(legend.position = "none") +
+    guides(fill = guide_legend(override.aes = list(shape=21)))
+  
+  pca_df = prcomp(t(batch_df), scale.=FALSE)
+  pca_df = pca_df$x
+  pca_df = as.data.frame(pca_df)
+  pca_df$batch <- as.factor(batch)
+  pca_df$class <- as.factor(class)
+  withbatch=ggplot(pca_df, aes(x = PC1, y = PC2, shape=class, fill=batch),colour='black', shape=21) +
+    stat_ellipse(geom="polygon", alpha=0.2, aes(color=batch,fill=batch),
+                 show.legend = FALSE, type=type) +
+    geom_point(size=2) +
+    scale_shape_manual(values=c(21,24)) + labs(x="", y="", title="Batch") +
+    theme_bw() + 
+    theme(legend.position = "none") +
+    guides(fill = guide_legend(override.aes = list(shape=21)))
+  
+  
+  pca_df = prcomp(t(bc.list[["combat"]]), scale.=FALSE)
+  pca_df = pca_df$x
+  pca_df = as.data.frame(pca_df)
+  pca_df$batch <- as.factor(batch)
+  pca_df$class <- as.factor(class)
+  combat=ggplot(pca_df, aes(x = PC1, y = PC2, shape=class, fill=batch),colour='black', shape=21) +
+    stat_ellipse(geom="polygon", alpha=0.2, aes(color=batch,fill=batch),
+                 show.legend = FALSE, type=type) +
+    geom_point(size=2) +
+    scale_shape_manual(values=c(21,24)) + labs(x="", y="", title="ComBat") +
+    theme_bw() + 
+    theme(legend.position = "none") +
+    guides(fill = guide_legend(override.aes = list(shape=21)))
+  
+  
+  
+  pca_df = prcomp(t(bc.list[["combatcov"]]), scale.=FALSE)
+  pca_df = pca_df$x
+  pca_df = as.data.frame(pca_df)
+  pca_df$batch <- as.factor(batch)
+  pca_df$class <- as.factor(class)
+  combat.cov=ggplot(pca_df, aes(x = PC1, y = PC2, shape=class, fill=batch),colour='black', shape=21) +
+    stat_ellipse(geom="polygon", alpha=0.2, aes(color=batch,fill=batch),
+                 show.legend = FALSE, type=type) +
+    geom_point(size=2) +
+    scale_shape_manual(values=c(21,24)) + labs(x="", y="", title="ComBat (cov)") +
+    theme_bw() + 
+    theme(legend.position = "none") +
+    guides(fill = guide_legend(override.aes = list(shape=21)))
+  
+  
+  
+  pca_df = prcomp(t(bc.list[["cscombat"]]), scale.=FALSE)
+  pca_df = pca_df$x
+  pca_df = as.data.frame(pca_df)
+  pca_df$batch <- as.factor(batch)
+  pca_df$class <- as.factor(class)
+  cscombat=ggplot(pca_df, aes(x = PC1, y = PC2, shape=class, fill=batch),colour='black', shape=21) +
+    stat_ellipse(geom="polygon", alpha=0.2, aes(color=batch,fill=batch),
+                 show.legend = FALSE, type=type) +
+    geom_point(size=2) +
+    scale_shape_manual(values=c(21,24)) + labs(x="", y="", title="CS-ComBat") +
+    theme_bw() + 
+    theme(legend.position = "none") +
+    guides(fill = guide_legend(override.aes = list(shape=21)))
+  
+  
+  
+  pca_df = prcomp(t(bc.list[["ratioa"]]), scale.=FALSE)
+  pca_df = pca_df$x
+  pca_df = as.data.frame(pca_df)
+  pca_df$batch <- as.factor(batch)
+  pca_df$class <- as.factor(class)
+  ratioa=ggplot(pca_df, aes(x = PC1, y = PC2, shape=class, fill=batch),colour='black', shape=21) +
+    stat_ellipse(geom="polygon", alpha=0.2, aes(color=batch,fill=batch),
+                 show.legend = FALSE, type=type) +
+    geom_point(size=2) +
+    scale_shape_manual(values=c(21,24)) + labs(x="", y="", title="Ratio-A") +
+    theme_bw() + 
+    theme(legend.position = "none") +
+    guides(fill = guide_legend(override.aes = list(shape=21)))
+  
+  
+  
+  pca_df = prcomp(t(bc.list[["ratiog"]]), scale.=FALSE)
+  pca_df = pca_df$x
+  pca_df = as.data.frame(pca_df)
+  pca_df$batch <- as.factor(batch)
+  pca_df$class <- as.factor(class)
+  ratiog=ggplot(pca_df, aes(x = PC1, y = PC2, shape=class, fill=batch),colour='black', shape=21) +
+    stat_ellipse(geom="polygon", alpha=0.2, aes(color=batch,fill=batch),
+                 show.legend = FALSE, type=type) +
+    geom_point(size=2) +
+    scale_shape_manual(values=c(21,24)) + labs(x="", y="", title="Ratio-G") +
+    theme_bw() + 
+    theme(legend.position = "none") +
+    guides(fill = guide_legend(override.aes = list(shape=21)))
+  
+  
+  
+  pca_df = prcomp(t(bc.list[["bmc"]]), scale.=FALSE)
+  pca_df = pca_df$x
+  pca_df = as.data.frame(pca_df)
+  pca_df$batch <- as.factor(batch)
+  pca_df$class <- as.factor(class)
+  bmc=ggplot(pca_df, aes(x = PC1, y = PC2, shape=class, fill=batch),colour='black', shape=21) +
+    stat_ellipse(geom="polygon", alpha=0.2, aes(color=batch,fill=batch),
+                 show.legend = FALSE, type=type) +
+    geom_point(size=2) +
+    scale_shape_manual(values=c(21,24)) + labs(x="", y="", title="BMC") +
+    theme_bw() + 
+    theme(legend.position = "none") +
+    guides(fill = guide_legend(override.aes = list(shape=21)))
+  
+  pca_df = prcomp(t(bc.list[["sva"]]), scale.=FALSE)
+  pca_df = pca_df$x
+  pca_df = as.data.frame(pca_df)
+  pca_df$batch <- as.factor(batch)
+  pca_df$class <- as.factor(class)
+  sva=ggplot(pca_df, aes(x = PC1, y = PC2, shape=class, fill=batch),colour='black', shape=21) +
+    stat_ellipse(geom="polygon", alpha=0.2, aes(color=batch,fill=batch),
+                 show.legend = FALSE, type=type) +
+    geom_point(size=2) +
+    scale_shape_manual(values=c(21,24)) + labs(x="", y="", title="SVA") +
+    theme_bw() + 
+    theme(legend.position = "none") +
+    guides(fill = guide_legend(override.aes = list(shape=21)))
+  
+  ### for supplementary
+  pca_legend = ggplot(pca_df, aes(x = PC1, y = PC2, shape=class, fill=batch),colour='black', shape=21) +
+    stat_ellipse(geom="polygon", alpha=0.2, aes(color=batch,fill=batch),
+                 show.legend = FALSE, type=type) +
+    geom_point(size=2) +
+    scale_shape_manual(values=c(21,24)) + labs(x="", y="", title="BMC") +
+    theme_bw() + 
+    guides(fill = guide_legend(override.aes = list(shape=21)))
+  shared_legend = extract_legend(pca_legend)
+  
+  #supp.plot = grid.arrange(nobatch,withbatch,ratioa,ratiog,bmc,combat,combat.cov,cscombat,sva,shared_legend,
+               #top=textGrob(paste0("Genomics data ",data.num)))
+  supp.plot = ggarrange(nobatch,withbatch,ratioa,ratiog,bmc,combat,combat.cov,cscombat,sva, common.legend = TRUE, legend="bottom")
+  #annotate_figure(supp.plot, top = text_grob(paste0("Genomics data ",data.num), 
+  #                                      color = "black", face = "bold", size = 14))
+  print(supp.plot)
+  annotate_figure(supp.plot, top = text_grob(paste0("Genomics data ",data.num), 
+                                             color = "black", face = "bold", size = 14))
+}
+PCA_all(bc.data1, batch, class,3)
+PCA_all(bc.data2, batch, class,2)
+PCA_all(bc.data3, batch, class,1)
+
+```
+#pRDA
+```{r}
+
+#pseudo- batch size is the same, but the class proportion is different
+
+m = 1000 # number of genes
+n = 80 # number of samples
+for(CEP in c(0.2,0.5,0.8))
+{
+  for(BEP in c(0.2,0.5,0.8))
+  {
+    set.seed(CEP*2+BEP*3+1)
+    class_split = c(36,4) # no. of samples in each class per batch
+    batch_imbal = FALSE # simulate batch size imbalance
+    batch_split = c(10,30) # no. of samples in each batch per class; only works if batch_imbal==TRUE
+    class = c(rep(-1,class_split[1]), rep(1,class_split[2]),
+              rep(-1,class_split[2]), rep(1,class_split[1])) #class factor
+    batch = rep(c(-1,1),each=(n/2)) #batch factor
+
+    
+    ###################### polyester
+    
+    ########## generate data with batch and class effect and test
+    # get parameters for each real dataset
+    counts1 = as.matrix(GSE53334[,2:ncol(GSE53334)])
+    counts2 = as.matrix(GSE122138[,2:ncol(GSE122138)])
+    counts3 = GSE106417
+    params1 = get_params(counts1)
+    params2 = get_params(counts2)
+    params3 = get_params(counts3)
+    
+    # Create batch imbalance simulation factor
+    if (batch_imbal == TRUE){ # regenerate batch and class factors if simulating batch size imbalance
+      batch = c(rep(-1,batch_split[1]*2), rep(1,batch_split[2]*2))
+      class = c(rep(c(-1,1),each=batch_split[1]), rep(c(-1,1),each=batch_split[2]))
+    }
+    
+    # Create pheno data
+    pdata = cbind(class,batch)
+    pdata = pdata[sample(nrow(pdata),replace=FALSE),]
+    class = pdata[,1]
+    batch = pdata[,2]
+    p_rep = TRUE ## perform pseudoreplication for class?
+    batch_p_rep = TRUE ## perform pseudoreplication for batch? !! p_rep must be set to TRUE
+    
+    #### pseudoreplication function
+    p.rep <- function(df, pdata, batch_p_rep){
+      pdata <- as.data.frame(pdata)
+      b1c1 <- which(pdata$class == -1 & pdata$batch == -1)
+      b1c2 <- which(pdata$class == 1 & pdata$batch == -1)
+      b2c1 <- which(pdata$class == -1 & pdata$batch == 1)
+      b2c2 <- which(pdata$class == 1 & pdata$batch == 1)
+      batch_classes <- list(b1c1,b1c2,b2c1,b2c2)
+      bc_sizes <- lapply(batch_classes, length) %>% unlist()
+      
+      if (length(unique(bc_sizes)) == 1) {
+        return(list(df=df, pdata=pdata))
+      }
+      out_df <- df
+      out_pdata <- pdata
+      temp_samples1 <- c()
+      temp_samples2 <- c()
+      #### Oversample classbatch 1
+      if (bc_sizes[2] < bc_sizes[1]){
+        add_samples1 <- bc_sizes[1] - bc_sizes[2] # no. of samples to oversample
+        # sample minority class
+        rand_samples1 <- sample(b1c2, add_samples1, replace=TRUE)
+        temp_samples1 <- df[,rand_samples1]
+        # Create effect factors
+        add_pdata1 <- data.frame(class=rep(1,add_samples1), batch=rep(-1,add_samples1))
+      } else if (bc_sizes[1] < bc_sizes[2]){
+        add_samples1 <- bc_sizes[2] - bc_sizes[1] # no. of samples to oversample
+        # sample minority class
+        rand_samples1 <- sample(b1c1, add_samples1, replace=TRUE)
+        temp_samples1 <- df[,rand_samples1]
+        # Create effect factors
+        add_pdata1 <- data.frame(class=rep(-1,add_samples1), batch=rep(-1,add_samples1))
+      }
+      
+      #### Oversample classbatch 2
+      if (bc_sizes[4] < bc_sizes[3]){
+        add_samples2 <- bc_sizes[3] - bc_sizes[4] # no. of samples to oversample
+        # sample minority class
+        rand_samples2 <- sample(b2c2, add_samples2, replace=TRUE)
+        temp_samples2 <- df[,rand_samples2]
+        # Create effect factors
+        add_pdata2 <- data.frame(class=rep(1,add_samples2), batch=rep(1,add_samples2))
+        
+      } else if (bc_sizes[3] < bc_sizes[4]){
+        add_samples2 <- bc_sizes[4] - bc_sizes[3] # no. of samples to oversample
+        # sample minority class
+        rand_samples2 <- sample(b2c1, add_samples2, replace=TRUE)
+        temp_samples2 <- df[,rand_samples2]
+        # Create effect factors
+        add_pdata2 <- data.frame(class=rep(-1,add_samples2), batch=rep(1,add_samples2))
+      }
+      if (!is.null(temp_samples1) & !is.null(temp_samples2)){
+        # Combine new samples and effect factors with original
+        add_df = cbind(temp_samples1, temp_samples2)
+        out_df = cbind(df, add_df)
+        
+        add_pdata = rbind(add_pdata1, add_pdata2)
+        out_pdata = rbind(pdata, add_pdata)
+      }
+      if (batch_p_rep == TRUE){
+        b1c1 <- which(out_pdata$class == -1 & out_pdata$batch == -1)
+        b1c2 <- which(out_pdata$class == 1 & out_pdata$batch == -1)
+        b2c1 <- which(out_pdata$class == -1 & out_pdata$batch == 1)
+        b2c2 <- which(out_pdata$class == 1 & out_pdata$batch == 1)
+        batch_classes <- list(b1c1,b1c2,b2c1,b2c2)
+        bc_sizes <- lapply(batch_classes, length) %>% unlist()
+        
+        # create list of class & batch factors for each class-batch
+        cblist <- list(c(-1,-1), c(1,-1), c(-1,1), c(1,1))
+        if ((bc_sizes[1] != bc_sizes[2]) | (bc_sizes[3] != bc_sizes[4])){
+          stop("Class sizes are not balanced.")
+        } else if (length(unique(bc_sizes)) == 1){
+          return(list(df=out_df, pdata=out_pdata))
+        } else {
+          ### oversample batches
+          # identify smaller batch
+          smaller_batch <- which(bc_sizes == min(bc_sizes))
+          # get smaller batch indexes
+          smaller_batch_inds1 <- batch_classes[[smaller_batch[1]]]
+          smaller_batch_inds2 <- batch_classes[[smaller_batch[2]]]
+          
+          # no. of samples to replicate
+          rep_samples <- max(bc_sizes) - min(bc_sizes)
+          smaller_batch_rep1 <- sample(smaller_batch_inds1, rep_samples, replace=TRUE)
+          smaller_batch_rep2 <- sample(smaller_batch_inds2, rep_samples, replace=TRUE)
+          
+          # replicate samples
+          temp_batch_samples1 <- out_df[,smaller_batch_rep1]
+          temp_batch_samples2 <- out_df[,smaller_batch_rep2]
+          new_batch_df <- cbind(temp_batch_samples1, temp_batch_samples2)
+          
+          out_df <- cbind(out_df, new_batch_df)
+          
+          # create new pdata to add to current pdata
+          batch_add_pdata1 <- data.frame(class=rep(cblist[[smaller_batch[1]]][1],rep_samples), batch=rep(cblist[[smaller_batch[1]]][2],rep_samples))
+          batch_add_pdata2 <- data.frame(class=rep(cblist[[smaller_batch[2]]][1],rep_samples), batch=rep(cblist[[smaller_batch[2]]][2],rep_samples))
+          out_pdata <- rbind(out_pdata, batch_add_pdata1, batch_add_pdata2)
+        }
+      }
+      colnames(out_df) <- seq(ncol(out_df))
+      return(list(df=out_df, pdata=out_pdata))
+    }
+    all_class_n1=c()
+    all_batch_n1=c()
+    all_class_n2=c()
+    all_batch_n2=c()
+    all_class_n3=c()
+    all_batch_n3=c()
+    all_class_a1=c()
+    all_batch_a1=c()
+    all_class_a2=c()
+    all_batch_a2=c()
+    all_class_a3=c()
+    all_batch_a3=c()
+    all_class_bc1=c()
+    all_class_bc2=c()
+    all_class_bc3=c()
+    all_batch_bc1=c()
+    all_batch_bc2=c()
+    all_batch_bc3=c()
+    for(iter in 1:100)
+    {
+      set.seed(iter+1)
+      # Create coefficients for class and batch
+      if (BEP < CEP){
+        gcoeffs = c(rnorm(n=CEP*m, mean=0, sd=1), rep(0, m-(CEP*m))) %>% cbind()
+        shared_BEP = BEP - 0.1
+        bcoeffs = c(rnorm(n=shared_BEP*m, mean=0, sd=1), rep(0, (1-BEP)*m), rnorm(n=0.1*m, mean=0, sd=1)) %>% cbind()
+      }
+      if (BEP >= CEP){
+        gcoeffs = c(rnorm(n=CEP*m, mean=0, sd=1), rep(0, m-(CEP*m))) %>% cbind()
+        shared_CEP = CEP - 0.1
+        bcoeffs = c(rep(0,0.1*m), rnorm(n=BEP*m, mean=0, sd=1), rep(0, m-((BEP+0.1)*m))) %>% cbind()
+      }
+      coeffs = cbind(bcoeffs,gcoeffs)
+      coeffs = coeffs[sample(1:nrow(coeffs)),]
+      colnames(coeffs) = c('batch','class')
+      both=which(coeffs[,'class'] != 0 & coeffs[,'batch'] != 0)
+      ce_only=which(coeffs[,'class'] != 0 & coeffs[,'batch'] == 0)
+      be_only=which(coeffs[,'class'] == 0 & coeffs[,'batch'] != 0)
+      none=which(coeffs[,'class'] == 0 & coeffs[,'batch'] == 0)
+      
+      ### Create "No batch" datasets for each real-world dataset
+      mod = model.matrix(~-1 + class)
+      
+      nobatch1 = create_read_numbers(params1$mu,params1$fit,params1$p0, m=m, n=n,
+                                     beta=gcoeffs, mod=mod)
+      nobatch2 = create_read_numbers(params2$mu,params2$fit,params2$p0, m=m, n=n,
+                                     beta=gcoeffs, mod=mod)
+      nobatch3 = create_read_numbers(params3$mu,params3$fit,params3$p0, m=m, n=n,
+                                     beta=gcoeffs, mod=mod)
+      
+      ### Log-transform the data
+      nobatch1_log <- log2(nobatch1)
+      nobatch1_log[is.infinite(nobatch1_log)] <- 0
+      nobatch2_log <- log2(nobatch2)
+      nobatch2_log[is.infinite(nobatch2_log)] <- 0
+      nobatch3_log <- log2(nobatch3)
+      nobatch3_log[is.infinite(nobatch3_log)] <- 0
+      
+      
+      ### Create "Batch" datasets for each real-world dataset
+      mod = model.matrix(~-1 + batch + class)
+      data1 = create_read_numbers(params1$mu,params1$fit,
+                                  params1$p0,m=dim(counts1)[1],n=dim(counts1)[2],
+                                  beta=coeffs,mod=mod)
+      data2 = create_read_numbers(params2$mu,params2$fit,
+                                  params2$p0,m=dim(counts2)[1],n=dim(counts3)[2],
+                                  beta=coeffs,mod=mod)
+      data3 = create_read_numbers(params3$mu,params3$fit,
+                                  params3$p0,m=dim(counts3)[1],n=dim(counts3)[2],
+                                  beta=coeffs,mod=mod)
+      
+      
+      
+      ### Log-transform the data
+      data1_log <- log2(data1)
+      data1_log[is.infinite(data1_log)] <- 0
+      data2_log <- log2(data2)
+      data2_log[is.infinite(data2_log)] <- 0
+      data3_log <- log2(data3)
+      data3_log[is.infinite(data3_log)] <- 0
+      
+      update_ids <- function(old_ids, deleted_id) {
+        if (length(old_ids) == 0) {
+          return(old_ids)
+        }
+        new_ids <- old_ids[old_ids != deleted_id]
+        new_ids[new_ids > deleted_id] <- new_ids[new_ids > deleted_id] - 1
+        return(new_ids)
+      }
+      
+      ################################## Batch effect correction for data1
+      batch_correct <- function(log_df, pdata, p_rep=FALSE, batch_p_rep=batch_p_rep, both, ce_only, be_only, none){
+        if (p_rep == FALSE){
+          pheno = as.data.frame(pdata)
+          edata = log_df
+        } else if (p_rep == TRUE){
+          pseudoreplicate = p.rep(log_df, pdata, batch_p_rep=batch_p_rep)
+          pheno = pseudoreplicate[['pdata']]
+          edata = pseudoreplicate[['df']]
+        }
+        
+        # perform ComBat
+        batch = pheno$batch
+        class=pheno$class
+        combat_edata = ComBat(edata, batch=batch, mod=NULL)
+        
+        # perform ComBat (cov)
+        mod = model.matrix(~as.factor(pheno$class), data=pheno)
+        combat_edata_cov = ComBat(edata, batch=batch, mod=mod)
+        
+        # perform CS-ComBat
+        tempdf = edata
+        colnames(tempdf) = seq(ncol(tempdf))
+        class1 = tempdf[,class == -1]
+        class2 = tempdf[,class == 1]
+        
+        cs.class1 = ComBat(class1, batch = as.factor(batch[class==-1]))
+        cs.class2 = ComBat(class2, batch = as.factor(batch[class==1]))
+        cscombat_edata = cbind(cs.class1, cs.class2)
+        cscombat_edata = cscombat_edata[,order(as.numeric(colnames(cscombat_edata)))]
+        
+        # perform Ratio A
+        ratioa_edata = t(bapred::ratioa(t(exp(edata)), as.factor(batch))$xadj)
+        ratioa_edata[which(is.na(ratioa_edata))] = 0
+        ratioa_edata = log(ratioa_edata,2)
+        # perform Ratio G
+        ratiog_edata = t(bapred::ratiog(t(exp(edata)), as.factor(batch))$xadj)
+        ratiog_edata[which(is.na(ratiog_edata))] = 0
+        ratiog_edata = log(ratiog_edata,2)
+        
+        # perform BMC
+        bmc_edata = t(bapred::meancenter(t(edata), as.factor(batch))$xadj)
+        
+        mod0 = model.matrix(~1,data=pheno)
+        
+        # filter and remove features that are completely 0
+        exp_mean <- apply(edata,1,mean)
+        filter_features <- which(exp_mean == 0)
+        if(length(filter_features) > 0){
+          f.edata = edata[-filter_features,]
+          print(filter_features)
+          filter_features <- sort(filter_features, decreasing = TRUE)
+          
+          # Create copies of your id variables
+          sva_both <- both
+          sva_ce_only <- ce_only
+          sva_be_only <- be_only
+          sva_none <- none
+          
+          for(ids in filter_features)
+          {
+            print(ids)
+            sva_both <- update_ids(sva_both, ids)
+            sva_ce_only <- update_ids(sva_ce_only, ids)
+            sva_be_only <- update_ids(sva_be_only, ids)
+            sva_none <- update_ids(sva_none, ids)
+          }
+        } else {
+          f.edata = edata
+          sva_both <- both
+          sva_ce_only <- ce_only
+          sva_be_only <- be_only
+          sva_none <- none
+        }
+        svobj = sva(f.edata,mod,mod0,n.sv=1) # no, of surrogate variables (1 batch)
+        
+        X = cbind(mod, svobj$sv)
+        Hat = solve(t(X) %*% X) %*% t(X)# %*% is matrix multiplication
+        beta = (Hat %*% t(f.edata))
+        rm(Hat)
+        gc()
+        P = ncol(mod)
+        sva_edata = f.edata - t(as.matrix(X[,-c(1:P)]) %*% beta[-c(1:P),])
+        
+        
+        #add sva in out_list variable
+        
+        out_list = list(combat=combat_edata,combatcov=combat_edata_cov,cscombat=cscombat_edata,
+                        ratioa=ratioa_edata,ratiog=ratiog_edata,bmc=bmc_edata,sva=sva_edata,sva_both=sva_both,
+                        sva_ce_only=sva_ce_only,sva_be_only=sva_be_only,sva_none=sva_none)
+        if (p_rep == TRUE){
+          out_list[1:7] = lapply(out_list[1:7], function(x) x[,1:ncol(log_df)])
+        }
+        
+        return(out_list)
+      }
+      bc.data1 <- batch_correct(data1_log, pdata, p_rep, batch_p_rep,both,ce_only,be_only,none)
+      bc.data2 <- batch_correct(data2_log, pdata,  p_rep, batch_p_rep,both,ce_only,be_only,none)
+      bc.data3 <- batch_correct(data3_log, pdata,  p_rep, batch_p_rep,both,ce_only,be_only,none)
+      ################################################################
+      # Simulations without batch
+      meta=as.data.frame(pdata)
+      #1:all 2:both 3:ce 4:be 5:none
+      class_n1=c()
+      batch_n1=c()
+      class_n1=cbind(class_n1,rda(t(nobatch1_log)~batch+Condition(class), meta)$pCCA$tot.chi/rda(t(nobatch1_log)~batch+Condition(class), meta)$tot.chi)
+      class_n1=cbind(class_n1,rda(t(nobatch1_log[both,])~batch+Condition(class), meta)$pCCA$tot.chi/rda(t(nobatch1_log[both,])~batch+Condition(class), meta)$tot.chi)
+      class_n1=cbind(class_n1,rda(t(nobatch1_log[ce_only,])~batch+Condition(class), meta)$pCCA$tot.chi/rda(t(nobatch1_log[ce_only,])~batch+Condition(class), meta)$tot.chi)
+      class_n1=cbind(class_n1,rda(t(nobatch1_log[be_only,])~batch+Condition(class), meta)$pCCA$tot.chi/rda(t(nobatch1_log[be_only,])~batch+Condition(class), meta)$tot.chi)
+      class_n1=cbind(class_n1,rda(t(nobatch1_log[none,])~batch+Condition(class), meta)$pCCA$tot.chi/rda(t(nobatch1_log[none,])~batch+Condition(class), meta)$tot.chi)
+      
+      batch_n1=cbind(batch_n1,rda(t(nobatch1_log)~class+Condition(batch), meta)$pCCA$tot.chi/rda(t(nobatch1_log)~class+Condition(batch), meta)$tot.chi)
+      batch_n1=cbind(batch_n1,rda(t(nobatch1_log[both,])~class+Condition(batch), meta)$pCCA$tot.chi/rda(t(nobatch1_log[both,])~class+Condition(batch), meta)$tot.chi)
+      batch_n1=cbind(batch_n1,rda(t(nobatch1_log[ce_only,])~class+Condition(batch), meta)$pCCA$tot.chi/rda(t(nobatch1_log[ce_only,])~class+Condition(batch), meta)$tot.chi)
+      batch_n1=cbind(batch_n1,rda(t(nobatch1_log[be_only,])~class+Condition(batch), meta)$pCCA$tot.chi/rda(t(nobatch1_log[be_only,])~class+Condition(batch), meta)$tot.chi)
+      batch_n1=cbind(batch_n1,rda(t(nobatch1_log[none,])~class+Condition(batch), meta)$pCCA$tot.chi/rda(t(nobatch1_log[none,])~class+Condition(batch), meta)$tot.chi)
+      
+      class_n2=c()
+      batch_n2=c()
+      class_n2=cbind(class_n2,rda(t(nobatch2_log)~batch+Condition(class), meta)$pCCA$tot.chi/rda(t(nobatch2_log)~batch+Condition(class), meta)$tot.chi)
+      class_n2=cbind(class_n2,rda(t(nobatch2_log[both,])~batch+Condition(class), meta)$pCCA$tot.chi/rda(t(nobatch2_log[both,])~batch+Condition(class), meta)$tot.chi)
+      class_n2=cbind(class_n2,rda(t(nobatch2_log[ce_only,])~batch+Condition(class), meta)$pCCA$tot.chi/rda(t(nobatch2_log[ce_only,])~batch+Condition(class), meta)$tot.chi)
+      class_n2=cbind(class_n2,rda(t(nobatch2_log[be_only,])~batch+Condition(class), meta)$pCCA$tot.chi/rda(t(nobatch2_log[be_only,])~batch+Condition(class), meta)$tot.chi)
+      class_n2=cbind(class_n2,rda(t(nobatch2_log[none,])~batch+Condition(class), meta)$pCCA$tot.chi/rda(t(nobatch2_log[none,])~batch+Condition(class), meta)$tot.chi)
+      
+      batch_n2=cbind(batch_n2,rda(t(nobatch2_log)~class+Condition(batch), meta)$pCCA$tot.chi/rda(t(nobatch2_log)~class+Condition(batch), meta)$tot.chi)
+      batch_n2=cbind(batch_n2,rda(t(nobatch2_log[both,])~class+Condition(batch), meta)$pCCA$tot.chi/rda(t(nobatch2_log[both,])~class+Condition(batch), meta)$tot.chi)
+      batch_n2=cbind(batch_n2,rda(t(nobatch2_log[ce_only,])~class+Condition(batch), meta)$pCCA$tot.chi/rda(t(nobatch2_log[ce_only,])~class+Condition(batch), meta)$tot.chi)
+      batch_n2=cbind(batch_n2,rda(t(nobatch2_log[be_only,])~class+Condition(batch), meta)$pCCA$tot.chi/rda(t(nobatch2_log[be_only,])~class+Condition(batch), meta)$tot.chi)
+      batch_n2=cbind(batch_n2,rda(t(nobatch2_log[none,])~class+Condition(batch), meta)$pCCA$tot.chi/rda(t(nobatch2_log[none,])~class+Condition(batch), meta)$tot.chi)
+      
+      
+      class_n3=c()
+      batch_n3=c()
+      class_n3=cbind(class_n3,rda(t(nobatch3_log)~batch+Condition(class), meta)$pCCA$tot.chi/rda(t(nobatch3_log)~batch+Condition(class), meta)$tot.chi)
+      class_n3=cbind(class_n3,rda(t(nobatch3_log[both,])~batch+Condition(class), meta)$pCCA$tot.chi/rda(t(nobatch3_log[both,])~batch+Condition(class), meta)$tot.chi)
+      class_n3=cbind(class_n3,rda(t(nobatch3_log[ce_only,])~batch+Condition(class), meta)$pCCA$tot.chi/rda(t(nobatch3_log[ce_only,])~batch+Condition(class), meta)$tot.chi)
+      class_n3=cbind(class_n3,rda(t(nobatch3_log[be_only,])~batch+Condition(class), meta)$pCCA$tot.chi/rda(t(nobatch3_log[be_only,])~batch+Condition(class), meta)$tot.chi)
+      class_n3=cbind(class_n3,rda(t(nobatch3_log[none,])~batch+Condition(class), meta)$pCCA$tot.chi/rda(t(nobatch3_log[none,])~batch+Condition(class), meta)$tot.chi)
+      
+      batch_n3=cbind(batch_n3,rda(t(nobatch3_log)~class+Condition(batch), meta)$pCCA$tot.chi/rda(t(nobatch3_log)~class+Condition(batch), meta)$tot.chi)
+      batch_n3=cbind(batch_n3,rda(t(nobatch3_log[both,])~class+Condition(batch), meta)$pCCA$tot.chi/rda(t(nobatch3_log[both,])~class+Condition(batch), meta)$tot.chi)
+      batch_n3=cbind(batch_n3,rda(t(nobatch3_log[ce_only,])~class+Condition(batch), meta)$pCCA$tot.chi/rda(t(nobatch3_log[ce_only,])~class+Condition(batch), meta)$tot.chi)
+      batch_n3=cbind(batch_n3,rda(t(nobatch3_log[be_only,])~class+Condition(batch), meta)$pCCA$tot.chi/rda(t(nobatch3_log[be_only,])~class+Condition(batch), meta)$tot.chi)
+      batch_n3=cbind(batch_n3,rda(t(nobatch3_log[none,])~class+Condition(batch), meta)$pCCA$tot.chi/rda(t(nobatch3_log[none,])~class+Condition(batch), meta)$tot.chi)
+      
+      
+      colnames(class_n1)=c("all","both","ce","be","none")
+      colnames(batch_n1)=c("all","both","ce","be","none")
+      all_class_n1=rbind(all_class_n1,class_n1)
+      all_batch_n1=rbind(all_batch_n1,batch_n1)
+      
+      colnames(class_n2)=c("all","both","ce","be","none")
+      colnames(batch_n2)=c("all","both","ce","be","none")
+      all_class_n2=rbind(all_class_n2,class_n2)
+      all_batch_n2=rbind(all_batch_n2,batch_n2)
+      
+      colnames(class_n3)=c("all","both","ce","be","none")
+      colnames(batch_n3)=c("all","both","ce","be","none")
+      all_class_n3=rbind(all_class_n3,class_n3)
+      all_batch_n3=rbind(all_batch_n3,batch_n3)
+      
+      #Before batch correction
+      class_a1=c()
+      batch_a1=c()
+      class_a1=cbind(class_a1,rda(t(data1_log)~batch+Condition(class), meta)$pCCA$tot.chi/rda(t(data1_log)~batch+Condition(class), meta)$tot.chi)
+      class_a1=cbind(class_a1,rda(t(data1_log[both,])~batch+Condition(class), meta)$pCCA$tot.chi/rda(t(data1_log[both,])~batch+Condition(class), meta)$tot.chi)
+      class_a1=cbind(class_a1,rda(t(data1_log[ce_only,])~batch+Condition(class), meta)$pCCA$tot.chi/rda(t(data1_log[ce_only,])~batch+Condition(class), meta)$tot.chi)
+      class_a1=cbind(class_a1,rda(t(data1_log[be_only,])~batch+Condition(class), meta)$pCCA$tot.chi/rda(t(data1_log[be_only,])~batch+Condition(class), meta)$tot.chi)
+      class_a1=cbind(class_a1,rda(t(data1_log[none,])~batch+Condition(class), meta)$pCCA$tot.chi/rda(t(data1_log[none,])~batch+Condition(class), meta)$tot.chi)
+      
+      batch_a1=cbind(batch_a1,rda(t(data1_log)~class+Condition(batch), meta)$pCCA$tot.chi/rda(t(data1_log)~class+Condition(batch), meta)$tot.chi)
+      batch_a1=cbind(batch_a1,rda(t(data1_log[both,])~class+Condition(batch), meta)$pCCA$tot.chi/rda(t(data1_log[both,])~class+Condition(batch), meta)$tot.chi)
+      batch_a1=cbind(batch_a1,rda(t(data1_log[ce_only,])~class+Condition(batch), meta)$pCCA$tot.chi/rda(t(data1_log[ce_only,])~class+Condition(batch), meta)$tot.chi)
+      batch_a1=cbind(batch_a1,rda(t(data1_log[be_only,])~class+Condition(batch), meta)$pCCA$tot.chi/rda(t(data1_log[be_only,])~class+Condition(batch), meta)$tot.chi)
+      batch_a1=cbind(batch_a1,rda(t(data1_log[none,])~class+Condition(batch), meta)$pCCA$tot.chi/rda(t(data1_log[none,])~class+Condition(batch), meta)$tot.chi)
+      
+      class_a2=c()
+      batch_a2=c()
+      class_a2=cbind(class_a2,rda(t(data2_log)~batch+Condition(class), meta)$pCCA$tot.chi/rda(t(data2_log)~batch+Condition(class), meta)$tot.chi)
+      class_a2=cbind(class_a2,rda(t(data2_log[both,])~batch+Condition(class), meta)$pCCA$tot.chi/rda(t(data2_log[both,])~batch+Condition(class), meta)$tot.chi)
+      class_a2=cbind(class_a2,rda(t(data2_log[ce_only,])~batch+Condition(class), meta)$pCCA$tot.chi/rda(t(data2_log[ce_only,])~batch+Condition(class), meta)$tot.chi)
+      class_a2=cbind(class_a2,rda(t(data2_log[be_only,])~batch+Condition(class), meta)$pCCA$tot.chi/rda(t(data2_log[be_only,])~batch+Condition(class), meta)$tot.chi)
+      class_a2=cbind(class_a2,rda(t(data2_log[none,])~batch+Condition(class), meta)$pCCA$tot.chi/rda(t(data2_log[none,])~batch+Condition(class), meta)$tot.chi)
+      
+      batch_a2=cbind(batch_a2,rda(t(data2_log)~class+Condition(batch), meta)$pCCA$tot.chi/rda(t(data2_log)~class+Condition(batch), meta)$tot.chi)
+      batch_a2=cbind(batch_a2,rda(t(data2_log[both,])~class+Condition(batch), meta)$pCCA$tot.chi/rda(t(data2_log[both,])~class+Condition(batch), meta)$tot.chi)
+      batch_a2=cbind(batch_a2,rda(t(data2_log[ce_only,])~class+Condition(batch), meta)$pCCA$tot.chi/rda(t(data2_log[ce_only,])~class+Condition(batch), meta)$tot.chi)
+      batch_a2=cbind(batch_a2,rda(t(data2_log[be_only,])~class+Condition(batch), meta)$pCCA$tot.chi/rda(t(data2_log[be_only,])~class+Condition(batch), meta)$tot.chi)
+      batch_a2=cbind(batch_a2,rda(t(data2_log[none,])~class+Condition(batch), meta)$pCCA$tot.chi/rda(t(data2_log[none,])~class+Condition(batch), meta)$tot.chi)
+      
+      
+      class_a3=c()
+      batch_a3=c()
+      class_a3=cbind(class_a3,rda(t(data3_log)~batch+Condition(class), meta)$pCCA$tot.chi/rda(t(data3_log)~batch+Condition(class), meta)$tot.chi)
+      class_a3=cbind(class_a3,rda(t(data3_log[both,])~batch+Condition(class), meta)$pCCA$tot.chi/rda(t(data3_log[both,])~batch+Condition(class), meta)$tot.chi)
+      class_a3=cbind(class_a3,rda(t(data3_log[ce_only,])~batch+Condition(class), meta)$pCCA$tot.chi/rda(t(data3_log[ce_only,])~batch+Condition(class), meta)$tot.chi)
+      class_a3=cbind(class_a3,rda(t(data3_log[be_only,])~batch+Condition(class), meta)$pCCA$tot.chi/rda(t(data3_log[be_only,])~batch+Condition(class), meta)$tot.chi)
+      class_a3=cbind(class_a3,rda(t(data3_log[none,])~batch+Condition(class), meta)$pCCA$tot.chi/rda(t(data3_log[none,])~batch+Condition(class), meta)$tot.chi)
+      
+      batch_a3=cbind(batch_a3,rda(t(data3_log)~class+Condition(batch), meta)$pCCA$tot.chi/rda(t(data3_log)~class+Condition(batch), meta)$tot.chi)
+      batch_a3=cbind(batch_a3,rda(t(data3_log[both,])~class+Condition(batch), meta)$pCCA$tot.chi/rda(t(data3_log[both,])~class+Condition(batch), meta)$tot.chi)
+      batch_a3=cbind(batch_a3,rda(t(data3_log[ce_only,])~class+Condition(batch), meta)$pCCA$tot.chi/rda(t(data3_log[ce_only,])~class+Condition(batch), meta)$tot.chi)
+      batch_a3=cbind(batch_a3,rda(t(data3_log[be_only,])~class+Condition(batch), meta)$pCCA$tot.chi/rda(t(data3_log[be_only,])~class+Condition(batch), meta)$tot.chi)
+      batch_a3=cbind(batch_a3,rda(t(data3_log[none,])~class+Condition(batch), meta)$pCCA$tot.chi/rda(t(data3_log[none,])~class+Condition(batch), meta)$tot.chi)
+      
+      colnames(class_a1)=c("all","both","ce","be","none")
+      colnames(batch_a1)=c("all","both","ce","be","none")
+      all_class_a1=rbind(all_class_a1,class_a1)
+      all_batch_a1=rbind(all_batch_a1,batch_a1)
+      
+      colnames(class_a2)=c("all","both","ce","be","none")
+      colnames(batch_a2)=c("all","both","ce","be","none")
+      all_class_a2=rbind(all_class_a2,class_a2)
+      all_batch_a2=rbind(all_batch_a2,batch_a2)
+      
+      colnames(class_a3)=c("all","both","ce","be","none")
+      colnames(batch_a3)=c("all","both","ce","be","none")
+      all_class_a3=rbind(all_class_a3,class_a3)
+      all_batch_a3=rbind(all_batch_a3,batch_a3)
+      
+      
+      #After batch correction
+      class_bc1=c()
+      sva_both=bc.data1[[8]]
+      sva_ce_only=bc.data1[[9]]
+      sva_be_only=bc.data1[[10]]
+      sva_none=bc.data1[[11]]
+      for(i in 1:7)
+      {
+        class_bc1=cbind(class_bc1,rda(t(bc.data1[[i]])~batch+Condition(class), meta)$pCCA$tot.chi/rda(t(bc.data1[[i]])~batch+Condition(class), meta)$tot.chi)
+      }
+      for(i in 8:14)
+      {
+        # Switch to sva_both when bc.data1 points to bc.data1[[7]]
+        ids <- if(i == 14) sva_both else both
+        class_bc1=cbind(class_bc1,rda(t(bc.data1[[i-7]][ids,])~batch+Condition(class), meta)$pCCA$tot.chi/rda(t(bc.data1[[i-7]][ids,])~batch+Condition(class), meta)$tot.chi)
+      }
+      for(i in 15:21)
+      {
+        # Switch to sva_ce_only when bc.data1 points to bc.data1[[7]]
+        ids <- if(i == 21) sva_ce_only else ce_only
+        class_bc1=cbind(class_bc1,rda(t(bc.data1[[i-14]][ids,])~batch+Condition(class), meta)$pCCA$tot.chi/rda(t(bc.data1[[i-14]][ids,])~batch+Condition(class), meta)$tot.chi)
+      }
+      
+      for(i in 22:28)
+      {
+        # Switch to sva_be_only when bc.data1 points to bc.data1[[7]]
+        ids <- if(i == 28) sva_be_only else be_only
+        class_bc1=cbind(class_bc1,rda(t(bc.data1[[i-21]][ids,])~batch+Condition(class), meta)$pCCA$tot.chi/rda(t(bc.data1[[i-21]][ids,])~batch+Condition(class), meta)$tot.chi)
+      }
+      
+      for(i in 29:35)
+      {
+        # Switch to sva_none when bc.data1 points to bc.data1[[7]]
+        ids <- if(i == 35) sva_none else none
+        class_bc1=cbind(class_bc1,rda(t(bc.data1[[i-28]][ids,])~batch+Condition(class), meta)$pCCA$tot.chi/rda(t(bc.data1[[i-28]][ids,])~batch+Condition(class), meta)$tot.chi)
+      }
+      
+      batch_bc1=c()
+      for(i in 1:7)
+      {
+        batch_bc1=cbind(batch_bc1,rda(t(bc.data1[[i]])~class+Condition(batch), meta)$pCCA$tot.chi/rda(t(bc.data1[[i]])~class+Condition(batch), meta)$tot.chi)
+      }
+      for(i in 8:14)
+      {
+        ids <- if(i == 14) sva_both else both
+        batch_bc1=cbind(batch_bc1,rda(t(bc.data1[[i-7]][ids,])~class+Condition(batch), meta)$pCCA$tot.chi/rda(t(bc.data1[[i-7]][ids,])~class+Condition(batch), meta)$tot.chi)
+      }
+      for(i in 15:21)
+      {
+        ids <- if(i == 21) sva_ce_only else ce_only
+        batch_bc1=cbind(batch_bc1,rda(t(bc.data1[[i-14]][ids,])~class+Condition(batch), meta)$pCCA$tot.chi/rda(t(bc.data1[[i-14]][ids,])~class+Condition(batch), meta)$tot.chi)
+      }
+      for(i in 22:28)
+      {
+        ids <- if(i == 28) sva_be_only else be_only
+        batch_bc1=cbind(batch_bc1,rda(t(bc.data1[[i-21]][ids,])~class+Condition(batch), meta)$pCCA$tot.chi/rda(t(bc.data1[[i-21]][ids,])~class+Condition(batch), meta)$tot.chi)
+      }
+      for(i in 29:35)
+      {
+        ids <- if(i == 35) sva_none else none
+        batch_bc1=cbind(batch_bc1,rda(t(bc.data1[[i-28]][ids,])~class+Condition(batch), meta)$pCCA$tot.chi/rda(t(bc.data1[[i-28]][ids,])~class+Condition(batch), meta)$tot.chi)
+      }
+      
+      
+      
+      class_bc2=c()
+      sva_both=bc.data2[[8]]
+      sva_ce_only=bc.data2[[9]]
+      sva_be_only=bc.data2[[10]]
+      sva_none=bc.data2[[11]]
+      for(i in 1:7)
+      {
+        class_bc2=cbind(class_bc2,rda(t(bc.data2[[i]])~batch+Condition(class), meta)$pCCA$tot.chi/rda(t(bc.data2[[i]])~batch+Condition(class), meta)$tot.chi)
+      }
+      for(i in 8:14)
+      {
+        # Switch to sva_both when bc.data2 points to bc.data2[[7]]
+        ids <- if(i == 14) sva_both else both
+        class_bc2=cbind(class_bc2,rda(t(bc.data2[[i-7]][ids,])~batch+Condition(class), meta)$pCCA$tot.chi/rda(t(bc.data2[[i-7]][ids,])~batch+Condition(class), meta)$tot.chi)
+      }
+      for(i in 15:21)
+      {
+        # Switch to sva_ce_only when bc.data2 points to bc.data2[[7]]
+        ids <- if(i == 21) sva_ce_only else ce_only
+        class_bc2=cbind(class_bc2,rda(t(bc.data2[[i-14]][ids,])~batch+Condition(class), meta)$pCCA$tot.chi/rda(t(bc.data2[[i-14]][ids,])~batch+Condition(class), meta)$tot.chi)
+      }
+      
+      for(i in 22:28)
+      {
+        # Switch to sva_be_only when bc.data2 points to bc.data2[[7]]
+        ids <- if(i == 28) sva_be_only else be_only
+        class_bc2=cbind(class_bc2,rda(t(bc.data2[[i-21]][ids,])~batch+Condition(class), meta)$pCCA$tot.chi/rda(t(bc.data2[[i-21]][ids,])~batch+Condition(class), meta)$tot.chi)
+      }
+      
+      for(i in 29:35)
+      {
+        # Switch to sva_none when bc.data2 points to bc.data2[[7]]
+        ids <- if(i == 35) sva_none else none
+        class_bc2=cbind(class_bc2,rda(t(bc.data2[[i-28]][ids,])~batch+Condition(class), meta)$pCCA$tot.chi/rda(t(bc.data2[[i-28]][ids,])~batch+Condition(class), meta)$tot.chi)
+      }
+      
+      batch_bc2=c()
+      for(i in 1:7)
+      {
+        batch_bc2=cbind(batch_bc2,rda(t(bc.data2[[i]])~class+Condition(batch), meta)$pCCA$tot.chi/rda(t(bc.data2[[i]])~class+Condition(batch), meta)$tot.chi)
+      }
+      for(i in 8:14)
+      {
+        ids <- if(i == 14) sva_both else both
+        batch_bc2=cbind(batch_bc2,rda(t(bc.data2[[i-7]][ids,])~class+Condition(batch), meta)$pCCA$tot.chi/rda(t(bc.data2[[i-7]][ids,])~class+Condition(batch), meta)$tot.chi)
+      }
+      for(i in 15:21)
+      {
+        ids <- if(i == 21) sva_ce_only else ce_only
+        batch_bc2=cbind(batch_bc2,rda(t(bc.data2[[i-14]][ids,])~class+Condition(batch), meta)$pCCA$tot.chi/rda(t(bc.data2[[i-14]][ids,])~class+Condition(batch), meta)$tot.chi)
+      }
+      for(i in 22:28)
+      {
+        ids <- if(i == 28) sva_be_only else be_only
+        batch_bc2=cbind(batch_bc2,rda(t(bc.data2[[i-21]][ids,])~class+Condition(batch), meta)$pCCA$tot.chi/rda(t(bc.data2[[i-21]][ids,])~class+Condition(batch), meta)$tot.chi)
+      }
+      for(i in 29:35)
+      {
+        ids <- if(i == 35) sva_none else none
+        batch_bc2=cbind(batch_bc2,rda(t(bc.data2[[i-28]][ids,])~class+Condition(batch), meta)$pCCA$tot.chi/rda(t(bc.data2[[i-28]][ids,])~class+Condition(batch), meta)$tot.chi)
+      }
+      
+      class_bc3=c()
+      sva_both=bc.data3[[8]]
+      sva_ce_only=bc.data3[[9]]
+      sva_be_only=bc.data3[[10]]
+      sva_none=bc.data3[[11]]
+      for(i in 1:7)
+      {
+        class_bc3=cbind(class_bc3,rda(t(bc.data3[[i]])~batch+Condition(class), meta)$pCCA$tot.chi/rda(t(bc.data3[[i]])~batch+Condition(class), meta)$tot.chi)
+      }
+      for(i in 8:14)
+      {
+        # Switch to sva_both when bc.data3 points to bc.data3[[7]]
+        ids <- if(i == 14) sva_both else both
+        class_bc3=cbind(class_bc3,rda(t(bc.data3[[i-7]][ids,])~batch+Condition(class), meta)$pCCA$tot.chi/rda(t(bc.data3[[i-7]][ids,])~batch+Condition(class), meta)$tot.chi)
+      }
+      for(i in 15:21)
+      {
+        # Switch to sva_ce_only when bc.data3 points to bc.data3[[7]]
+        ids <- if(i == 21) sva_ce_only else ce_only
+        class_bc3=cbind(class_bc3,rda(t(bc.data3[[i-14]][ids,])~batch+Condition(class), meta)$pCCA$tot.chi/rda(t(bc.data3[[i-14]][ids,])~batch+Condition(class), meta)$tot.chi)
+      }
+      
+      for(i in 22:28)
+      {
+        # Switch to sva_be_only when bc.data3 points to bc.data3[[7]]
+        ids <- if(i == 28) sva_be_only else be_only
+        class_bc3=cbind(class_bc3,rda(t(bc.data3[[i-21]][ids,])~batch+Condition(class), meta)$pCCA$tot.chi/rda(t(bc.data3[[i-21]][ids,])~batch+Condition(class), meta)$tot.chi)
+      }
+      
+      for(i in 29:35)
+      {
+        # Switch to sva_none when bc.data3 points to bc.data3[[7]]
+        ids <- if(i == 35) sva_none else none
+        class_bc3=cbind(class_bc3,rda(t(bc.data3[[i-28]][ids,])~batch+Condition(class), meta)$pCCA$tot.chi/rda(t(bc.data3[[i-28]][ids,])~batch+Condition(class), meta)$tot.chi)
+      }
+      
+      batch_bc3=c()
+      for(i in 1:7)
+      {
+        batch_bc3=cbind(batch_bc3,rda(t(bc.data3[[i]])~class+Condition(batch), meta)$pCCA$tot.chi/rda(t(bc.data3[[i]])~class+Condition(batch), meta)$tot.chi)
+      }
+      for(i in 8:14)
+      {
+        ids <- if(i == 14) sva_both else both
+        batch_bc3=cbind(batch_bc3,rda(t(bc.data3[[i-7]][ids,])~class+Condition(batch), meta)$pCCA$tot.chi/rda(t(bc.data3[[i-7]][ids,])~class+Condition(batch), meta)$tot.chi)
+      }
+      for(i in 15:21)
+      {
+        ids <- if(i == 21) sva_ce_only else ce_only
+        batch_bc3=cbind(batch_bc3,rda(t(bc.data3[[i-14]][ids,])~class+Condition(batch), meta)$pCCA$tot.chi/rda(t(bc.data3[[i-14]][ids,])~class+Condition(batch), meta)$tot.chi)
+      }
+      for(i in 22:28)
+      {
+        ids <- if(i == 28) sva_be_only else be_only
+        batch_bc3=cbind(batch_bc3,rda(t(bc.data3[[i-21]][ids,])~class+Condition(batch), meta)$pCCA$tot.chi/rda(t(bc.data3[[i-21]][ids,])~class+Condition(batch), meta)$tot.chi)
+      }
+      for(i in 29:35)
+      {
+        ids <- if(i == 35) sva_none else none
+        batch_bc3=cbind(batch_bc3,rda(t(bc.data3[[i-28]][ids,])~class+Condition(batch), meta)$pCCA$tot.chi/rda(t(bc.data3[[i-28]][ids,])~class+Condition(batch), meta)$tot.chi)
+      }
+      
+      all_class_bc1=rbind(all_class_bc1,class_bc1)
+      all_class_bc2=rbind(all_class_bc2,class_bc2)
+      all_class_bc3=rbind(all_class_bc3,class_bc3)
+      all_batch_bc1=rbind(all_batch_bc1,batch_bc1)
+      all_batch_bc2=rbind(all_batch_bc2,batch_bc2)
+      all_batch_bc3=rbind(all_batch_bc3,batch_bc3)
+    }
+    #all_class_bc1=apply(all_class_bc1,2,mean)
+    #all_class_bc2=apply(all_class_bc2,2,mean)
+    #all_class_bc3=apply(all_class_bc3,2,mean)
+    #all_batch_bc1=apply(all_batch_bc1,2,mean)
+    #all_batch_bc2=apply(all_batch_bc2,2,mean)
+    #all_batch_bc3=apply(all_batch_bc3,2,mean)
+    #
+    #all_class_a1=apply(all_class_a1,2,mean)
+    #all_class_a2=apply(all_class_a2,2,mean)
+    #all_class_a3=apply(all_class_a3,2,mean)
+    #all_batch_a1=apply(all_batch_a1,2,mean)
+    #all_batch_a2=apply(all_batch_a2,2,mean)
+    #all_batch_a3=apply(all_batch_a3,2,mean)
+    #
+    #all_class_n1=apply(all_class_n1,2,mean)
+    #all_class_n2=apply(all_class_n2,2,mean)
+    #all_class_n3=apply(all_class_n3,2,mean)
+    #all_batch_n1=apply(all_batch_n1,2,mean)
+    #all_batch_n2=apply(all_batch_n2,2,mean)
+    #all_batch_n3=apply(all_batch_n3,2,mean)
+    
+    df_list <- list(
+      all_class_n1_mean=data.frame(mean=apply(all_class_n1,2,mean)),
+      all_class_n2_mean=data.frame(mean=apply(all_class_n2,2,mean)),
+      all_class_n3_mean=data.frame(mean=apply(all_class_n3,2,mean)),
+      all_batch_n1_mean=data.frame(mean=apply(all_batch_n1,2,mean)),
+      all_batch_n2_mean=data.frame(mean=apply(all_batch_n2,2,mean)),
+      all_batch_n3_mean=data.frame(mean=apply(all_batch_n3,2,mean)),
+      all_class_a1_mean=data.frame(mean=apply(all_class_a1,2,mean)),
+      all_class_a2_mean=data.frame(mean=apply(all_class_a2,2,mean)),
+      all_class_a3_mean=data.frame(mean=apply(all_class_a3,2,mean)),
+      all_batch_a1_mean=data.frame(mean=apply(all_batch_a1,2,mean)),
+      all_batch_a2_mean=data.frame(mean=apply(all_batch_a2,2,mean)),
+      all_batch_a3_mean=data.frame(mean=apply(all_batch_a3,2,mean))
+    )
+    
+    df_list <- lapply(names(df_list), function(x) {
+      df <- df_list[[x]]
+      df$DataFrameName <- x
+      df
+    })
+    
+    all_data1 <- do.call(rbind, df_list)
+    all_data1$category<-all_cats[,3]
+    #all_class_bc1=data.frame(mean=apply(all_class_bc1,2,mean)),
+    #all_class_bc2=data.frame(mean=apply(all_class_bc2,2,mean)),
+    #all_class_bc3=data.frame(mean=apply(all_class_bc3,2,mean)),
+    #all_batch_bc1=data.frame(mean=apply(all_batch_bc1,2,mean)),
+    #all_batch_bc2=data.frame(mean=apply(all_batch_bc2,2,mean)),
+    #all_batch_bc3=data.frame(mean=apply(all_batch_bc3,2,mean)),
+    
+    df_list2 <- list(
+      all_class_bc1_mean=data.frame(mean=apply(all_class_bc1,2,mean)),
+      all_class_bc2_mean=data.frame(mean=apply(all_class_bc2,2,mean)),
+      all_class_bc3_mean=data.frame(mean=apply(all_class_bc3,2,mean)),
+      all_batch_bc1_mean=data.frame(mean=apply(all_batch_bc1,2,mean)),
+      all_batch_bc2_mean=data.frame(mean=apply(all_batch_bc2,2,mean)),
+      all_batch_bc3_mean=data.frame(mean=apply(all_batch_bc3,2,mean))
+    )
+    
+    df_list2 <- lapply(names(df_list2), function(x) {
+      df <- df_list2[[x]]
+      df$DataFrameName <- x
+      df
+    })
+    
+    all_data2 <- do.call(rbind, df_list2)
+    all_data2$category<-all_cols[,3]
+    all_data2$method<-all_cols[,5]
+    all_data=list()
+    length=2
+    all_data[[1]]=all_data1
+    all_data[[2]]=all_data2
+    write.xlsx(all_data,paste0("pRDAdata",CEP,"_",BEP,"_after_pr.xlsx"))
+    
+  }}
+
+```
+#differential analysis
+```{r}
+
+#pseudo- batch size is the same, but the class proportion is different
+
+m = 1000 # number of genes
+n = 80 # number of samples
+for(CEP in c(0.2,0.5,0.8))
+{
+  for(BEP in c(0.2,0.5,0.8))
+  {
+    set.seed(CEP*2+BEP*3+1)
+    class_split = c(36,4) # no. of samples in each class per batch
+    batch_imbal = FALSE # simulate batch size imbalance
+    batch_split = c(10,30) # no. of samples in each batch per class; only works if batch_imbal==TRUE
+    class = c(rep(-1,class_split[1]), rep(1,class_split[2]),
+              rep(-1,class_split[2]), rep(1,class_split[1])) #class factor
+    batch = rep(c(-1,1),each=(n/2)) #batch factor
+    
+    
+    ###################### polyester
+    
+    ########## generate data with batch and class effect and test
+    # get parameters for each real dataset
+    counts1 = as.matrix(GSE53334[,2:ncol(GSE53334)])
+    counts2 = as.matrix(GSE122138[,2:ncol(GSE122138)])
+    counts3 = GSE106417
+    params1 = get_params(counts1)
+    params2 = get_params(counts2)
+    params3 = get_params(counts3)
+    
+    # Create batch imbalance simulation factor
+    if (batch_imbal == TRUE){ # regenerate batch and class factors if simulating batch size imbalance
+      batch = c(rep(-1,batch_split[1]*2), rep(1,batch_split[2]*2))
+      class = c(rep(c(-1,1),each=batch_split[1]), rep(c(-1,1),each=batch_split[2]))
+    }
+    
+    # Create pheno data
+    pdata = cbind(class,batch)
+    pdata = pdata[sample(nrow(pdata),replace=FALSE),]
+    class = pdata[,1]
+    batch = pdata[,2]
+    p_rep = TRUE ## perform pseudoreplication for class?
+    batch_p_rep = TRUE ## perform pseudoreplication for batch? !! p_rep must be set to TRUE
+    
+    #### pseudoreplication function
+    p.rep <- function(df, pdata, batch_p_rep){
+      pdata <- as.data.frame(pdata)
+      b1c1 <- which(pdata$class == -1 & pdata$batch == -1)
+      b1c2 <- which(pdata$class == 1 & pdata$batch == -1)
+      b2c1 <- which(pdata$class == -1 & pdata$batch == 1)
+      b2c2 <- which(pdata$class == 1 & pdata$batch == 1)
+      batch_classes <- list(b1c1,b1c2,b2c1,b2c2)
+      bc_sizes <- lapply(batch_classes, length) %>% unlist()
+      
+      if (length(unique(bc_sizes)) == 1) {
+        return(list(df=df, pdata=pdata))
+      }
+      out_df <- df
+      out_pdata <- pdata
+      temp_samples1 <- c()
+      temp_samples2 <- c()
+      #### Oversample classbatch 1
+      if (bc_sizes[2] < bc_sizes[1]){
+        add_samples1 <- bc_sizes[1] - bc_sizes[2] # no. of samples to oversample
+        # sample minority class
+        rand_samples1 <- sample(b1c2, add_samples1, replace=TRUE)
+        temp_samples1 <- df[,rand_samples1]
+        # Create effect factors
+        add_pdata1 <- data.frame(class=rep(1,add_samples1), batch=rep(-1,add_samples1))
+      } else if (bc_sizes[1] < bc_sizes[2]){
+        add_samples1 <- bc_sizes[2] - bc_sizes[1] # no. of samples to oversample
+        # sample minority class
+        rand_samples1 <- sample(b1c1, add_samples1, replace=TRUE)
+        temp_samples1 <- df[,rand_samples1]
+        # Create effect factors
+        add_pdata1 <- data.frame(class=rep(-1,add_samples1), batch=rep(-1,add_samples1))
+      }
+      
+      #### Oversample classbatch 2
+      if (bc_sizes[4] < bc_sizes[3]){
+        add_samples2 <- bc_sizes[3] - bc_sizes[4] # no. of samples to oversample
+        # sample minority class
+        rand_samples2 <- sample(b2c2, add_samples2, replace=TRUE)
+        temp_samples2 <- df[,rand_samples2]
+        # Create effect factors
+        add_pdata2 <- data.frame(class=rep(1,add_samples2), batch=rep(1,add_samples2))
+        
+      } else if (bc_sizes[3] < bc_sizes[4]){
+        add_samples2 <- bc_sizes[4] - bc_sizes[3] # no. of samples to oversample
+        # sample minority class
+        rand_samples2 <- sample(b2c1, add_samples2, replace=TRUE)
+        temp_samples2 <- df[,rand_samples2]
+        # Create effect factors
+        add_pdata2 <- data.frame(class=rep(-1,add_samples2), batch=rep(1,add_samples2))
+      }
+      if (!is.null(temp_samples1) & !is.null(temp_samples2)){
+        # Combine new samples and effect factors with original
+        add_df = cbind(temp_samples1, temp_samples2)
+        out_df = cbind(df, add_df)
+        
+        add_pdata = rbind(add_pdata1, add_pdata2)
+        out_pdata = rbind(pdata, add_pdata)
+      }
+      if (batch_p_rep == TRUE){
+        b1c1 <- which(out_pdata$class == -1 & out_pdata$batch == -1)
+        b1c2 <- which(out_pdata$class == 1 & out_pdata$batch == -1)
+        b2c1 <- which(out_pdata$class == -1 & out_pdata$batch == 1)
+        b2c2 <- which(out_pdata$class == 1 & out_pdata$batch == 1)
+        batch_classes <- list(b1c1,b1c2,b2c1,b2c2)
+        bc_sizes <- lapply(batch_classes, length) %>% unlist()
+        
+        # create list of class & batch factors for each class-batch
+        cblist <- list(c(-1,-1), c(1,-1), c(-1,1), c(1,1))
+        if ((bc_sizes[1] != bc_sizes[2]) | (bc_sizes[3] != bc_sizes[4])){
+          stop("Class sizes are not balanced.")
+        } else if (length(unique(bc_sizes)) == 1){
+          return(list(df=out_df, pdata=out_pdata))
+        } else {
+          ### oversample batches
+          # identify smaller batch
+          smaller_batch <- which(bc_sizes == min(bc_sizes))
+          # get smaller batch indexes
+          smaller_batch_inds1 <- batch_classes[[smaller_batch[1]]]
+          smaller_batch_inds2 <- batch_classes[[smaller_batch[2]]]
+          
+          # no. of samples to replicate
+          rep_samples <- max(bc_sizes) - min(bc_sizes)
+          smaller_batch_rep1 <- sample(smaller_batch_inds1, rep_samples, replace=TRUE)
+          smaller_batch_rep2 <- sample(smaller_batch_inds2, rep_samples, replace=TRUE)
+          
+          # replicate samples
+          temp_batch_samples1 <- out_df[,smaller_batch_rep1]
+          temp_batch_samples2 <- out_df[,smaller_batch_rep2]
+          new_batch_df <- cbind(temp_batch_samples1, temp_batch_samples2)
+          
+          out_df <- cbind(out_df, new_batch_df)
+          
+          # create new pdata to add to current pdata
+          batch_add_pdata1 <- data.frame(class=rep(cblist[[smaller_batch[1]]][1],rep_samples), batch=rep(cblist[[smaller_batch[1]]][2],rep_samples))
+          batch_add_pdata2 <- data.frame(class=rep(cblist[[smaller_batch[2]]][1],rep_samples), batch=rep(cblist[[smaller_batch[2]]][2],rep_samples))
+          out_pdata <- rbind(out_pdata, batch_add_pdata1, batch_add_pdata2)
+        }
+      }
+      colnames(out_df) <- seq(ncol(out_df))
+      return(list(df=out_df, pdata=out_pdata))
+    }
+    all_class_n1=c()
+    all_batch_n1=c()
+    all_class_n2=c()
+    all_batch_n2=c()
+    all_class_n3=c()
+    all_batch_n3=c()
+    all_class_a1=c()
+    all_batch_a1=c()
+    all_class_a2=c()
+    all_batch_a2=c()
+    all_class_a3=c()
+    all_batch_a3=c()
+    all_class_bc1=c()
+    all_class_bc2=c()
+    all_class_bc3=c()
+    all_batch_bc1=c()
+    all_batch_bc2=c()
+    all_batch_bc3=c()
+    for(iter in 1:100)
+    {
+      set.seed(iter+1)
+      # Create coefficients for class and batch
+      if (BEP < CEP){
+        gcoeffs = c(rnorm(n=CEP*m, mean=0, sd=1), rep(0, m-(CEP*m))) %>% cbind()
+        shared_BEP = BEP - 0.1
+        bcoeffs = c(rnorm(n=shared_BEP*m, mean=0, sd=1), rep(0, (1-BEP)*m), rnorm(n=0.1*m, mean=0, sd=1)) %>% cbind()
+      }
+      if (BEP >= CEP){
+        gcoeffs = c(rnorm(n=CEP*m, mean=0, sd=1), rep(0, m-(CEP*m))) %>% cbind()
+        shared_CEP = CEP - 0.1
+        bcoeffs = c(rep(0,0.1*m), rnorm(n=BEP*m, mean=0, sd=1), rep(0, m-((BEP+0.1)*m))) %>% cbind()
+      }
+      coeffs = cbind(bcoeffs,gcoeffs)
+      #coeffs = coeffs[sample(1:nrow(coeffs)),]
+      colnames(coeffs) = c('batch','class')
+      both=which(coeffs[,'class'] != 0 & coeffs[,'batch'] != 0)
+      ce_only=which(coeffs[,'class'] != 0 & coeffs[,'batch'] == 0)
+      be_only=which(coeffs[,'class'] == 0 & coeffs[,'batch'] != 0)
+      none=which(coeffs[,'class'] == 0 & coeffs[,'batch'] == 0)
+      
+      ### Create "No batch" datasets for each real-world dataset
+      mod = model.matrix(~-1 + class)
+      
+      nobatch1 = create_read_numbers(params1$mu,params1$fit,params1$p0, m=m, n=n,
+                                     beta=gcoeffs, mod=mod)
+      nobatch2 = create_read_numbers(params2$mu,params2$fit,params2$p0, m=m, n=n,
+                                     beta=gcoeffs, mod=mod)
+      nobatch3 = create_read_numbers(params3$mu,params3$fit,params3$p0, m=m, n=n,
+                                     beta=gcoeffs, mod=mod)
+      
+      ### Log-transform the data
+      nobatch1_log <- log2(nobatch1)
+      nobatch1_log[is.infinite(nobatch1_log)] <- 0
+      nobatch2_log <- log2(nobatch2)
+      nobatch2_log[is.infinite(nobatch2_log)] <- 0
+      nobatch3_log <- log2(nobatch3)
+      nobatch3_log[is.infinite(nobatch3_log)] <- 0
+      
+      
+      ### Create "Batch" datasets for each real-world dataset
+      mod = model.matrix(~-1 + batch + class)
+      data1 = create_read_numbers(params1$mu,params1$fit,
+                                  params1$p0,m=dim(counts1)[1],n=dim(counts1)[2],
+                                  beta=coeffs,mod=mod)
+      data2 = create_read_numbers(params2$mu,params2$fit,
+                                  params2$p0,m=dim(counts2)[1],n=dim(counts3)[2],
+                                  beta=coeffs,mod=mod)
+      data3 = create_read_numbers(params3$mu,params3$fit,
+                                  params3$p0,m=dim(counts3)[1],n=dim(counts3)[2],
+                                  beta=coeffs,mod=mod)
+      
+      
+      
+      ### Log-transform the data
+      data1_log <- log2(data1)
+      data1_log[is.infinite(data1_log)] <- 0
+      data2_log <- log2(data2)
+      data2_log[is.infinite(data2_log)] <- 0
+      data3_log <- log2(data3)
+      data3_log[is.infinite(data3_log)] <- 0
+      
+      update_ids <- function(old_ids, deleted_id) {
+        if (length(old_ids) == 0) {
+          return(old_ids)
+        }
+        new_ids <- old_ids[old_ids != deleted_id]
+        new_ids[new_ids > deleted_id] <- new_ids[new_ids > deleted_id] - 1
+        return(new_ids)
+      }
+      
+      ################################## Batch effect correction for data1
+      batch_correct <- function(log_df, pdata, p_rep=FALSE, batch_p_rep=batch_p_rep, both, ce_only, be_only, none){
+        if (p_rep == FALSE){
+          pheno = as.data.frame(pdata)
+          edata = log_df
+        } else if (p_rep == TRUE){
+          pseudoreplicate = p.rep(log_df, pdata, batch_p_rep=batch_p_rep)
+          pheno = pseudoreplicate[['pdata']]
+          edata = pseudoreplicate[['df']]
+        }
+        
+        # perform ComBat
+        batch = pheno$batch
+        class=pheno$class
+        combat_edata = ComBat(edata, batch=batch, mod=NULL)
+        
+        # perform ComBat (cov)
+        mod = model.matrix(~as.factor(pheno$class), data=pheno)
+        combat_edata_cov = ComBat(edata, batch=batch, mod=mod)
+        
+        # perform CS-ComBat
+        tempdf = edata
+        colnames(tempdf) = seq(ncol(tempdf))
+        class1 = tempdf[,class == -1]
+        class2 = tempdf[,class == 1]
+        
+        cs.class1 = ComBat(class1, batch = as.factor(batch[class==-1]))
+        cs.class2 = ComBat(class2, batch = as.factor(batch[class==1]))
+        cscombat_edata = cbind(cs.class1, cs.class2)
+        cscombat_edata = cscombat_edata[,order(as.numeric(colnames(cscombat_edata)))]
+        
+        # perform Ratio A
+        ratioa_edata = t(bapred::ratioa(t(exp(edata)), as.factor(batch))$xadj)
+        ratioa_edata[which(is.na(ratioa_edata))] = 0
+        ratioa_edata = log(ratioa_edata,2)
+        # perform Ratio G
+        ratiog_edata = t(bapred::ratiog(t(exp(edata)), as.factor(batch))$xadj)
+        ratiog_edata[which(is.na(ratiog_edata))] = 0
+        ratiog_edata = log(ratiog_edata,2)
+        
+        # perform BMC
+        bmc_edata = t(bapred::meancenter(t(edata), as.factor(batch))$xadj)
+        
+        mod0 = model.matrix(~1,data=pheno)
+        
+        # filter and remove features that are completely 0
+        exp_mean <- apply(edata,1,mean)
+        filter_features <- which(exp_mean == 0)
+        if(length(filter_features) > 0){
+          f.edata = edata[-filter_features,]
+          print(filter_features)
+          filter_features <- sort(filter_features, decreasing = TRUE)
+          
+          # Create copies of your id variables
+          sva_both <- both
+          sva_ce_only <- ce_only
+          sva_be_only <- be_only
+          sva_none <- none
+          
+          for(ids in filter_features)
+          {
+            print(ids)
+            sva_both <- update_ids(sva_both, ids)
+            sva_ce_only <- update_ids(sva_ce_only, ids)
+            sva_be_only <- update_ids(sva_be_only, ids)
+            sva_none <- update_ids(sva_none, ids)
+          }
+        } else {
+          f.edata = edata
+          sva_both <- both
+          sva_ce_only <- ce_only
+          sva_be_only <- be_only
+          sva_none <- none
+        }
+        svobj = sva(f.edata,mod,mod0,n.sv=1) # no, of surrogate variables (1 batch)
+        
+        X = cbind(mod, svobj$sv)
+        Hat = solve(t(X) %*% X) %*% t(X)# %*% is matrix multiplication
+        beta = (Hat %*% t(f.edata))
+        rm(Hat)
+        gc()
+        P = ncol(mod)
+        sva_edata = f.edata - t(as.matrix(X[,-c(1:P)]) %*% beta[-c(1:P),])
+        
+        
+        #add sva in out_list variable
+        
+        out_list = list(combat=combat_edata,combatcov=combat_edata_cov,cscombat=cscombat_edata,
+                        ratioa=ratioa_edata,ratiog=ratiog_edata,bmc=bmc_edata,sva=sva_edata,sva_both=sva_both,
+                        sva_ce_only=sva_ce_only,sva_be_only=sva_be_only,sva_none=sva_none)
+        if (p_rep == TRUE){
+          out_list[1:7] = lapply(out_list[1:7], function(x) x[,1:ncol(log_df)])
+        }
+        
+        return(out_list)
+      }
+      bc.data1 <- batch_correct(data1_log, pdata, p_rep, batch_p_rep,both,ce_only,be_only,none)
+      bc.data2 <- batch_correct(data2_log, pdata,  p_rep, batch_p_rep,both,ce_only,be_only,none)
+      bc.data3 <- batch_correct(data3_log, pdata,  p_rep, batch_p_rep,both,ce_only,be_only,none)
+      ################################################################
+      
+      meta=as.data.frame(pdata)
+      #1:all 2:both 3:ce 4:be 5:none
+      gtest=function(data1,data2)
+      {
+        result=c()
+        for(i in 1:nrow(data1))
+        {
+          if(sd(data1[i,])<1e-6 && sd(data2[i,])<1e-6)
+          {
+            data1[i,1]=jitter(data1[i,1])
+          }
+          a=t.test(data1[i,],data2[i,])
+          result=rbind(result,a$p.value)
+        }
+        result=p.adjust(result,method = "BH")
+        result=as.data.frame(result)
+        rownames(result)=rownames(data1)
+        return (result)
+      }
+      logfctest=function(data1,data2)
+      {
+        result=c()
+        for(i in 1:nrow(data1))
+        {
+          mean1=mean(as.numeric(data1[i,]))
+          mean2=mean(as.numeric(data2[i,]))
+          logfc=sqrt(mean1+1) - sqrt(mean2+1)
+          result=rbind(result,logfc)
+        }
+        result=as.data.frame(result)
+        rownames(result)=rownames(data1)
+        return (result)
+      }
+      differ<-function(ce_only,non_ce,test)#test1: cancerset, test2: normalset
+      {
+        allid=sort(union(ce_only,non_ce))
+        rownames(test)=allid
+        test1=test[,meta[,1]==-1]
+        test2=test[,meta[,1]==1]
+        pval=gtest(test1,test2)
+        fc=logfctest(test1,test2)
+        tmppos=rownames(pval)[pval[,1]<=0.05]
+        #tmppos2=rownames(fc)[abs(fc[,1])>=1]
+        #testpos=intersect(tmppos,tmppos2)
+        testpos=tmppos
+        testneg=setdiff(rownames(test1),testpos)
+        TP=intersect(as.character(ce_only),testpos)
+        FP=intersect(as.character(non_ce),testpos)
+        TN=intersect(as.character(non_ce),testneg)
+        FN=intersect(as.character(ce_only),testneg)
+        precision=length(TP)/(length(TP)+length(FP))
+        recall=length(TP)/(length(TP)+length(FN))
+        fs=2*(precision*recall)/(precision+recall)
+        out_list = list(TP=length(TP),FP=length(FP),TN=length(TN),FN=length(FN),
+                        precision=precision,recall=recall,fs=fs)
+        return (out_list)
+      }
+      #test now
+      #non_ce=setdiff(union(be_only,union(both,none)),ce_only)
+      #tmpres=differ(ce_only,non_ce,bc.data2[[2]])
+      ce=union(ce_only,both)
+      non_ce=setdiff(union(be_only,union(both,none)),ce)
+      class_n1=c()
+      class_n2=c()
+      class_n3=c()
+      class_n1=cbind(class_n1,differ(ce,non_ce,nobatch1_log))
+      class_n2=cbind(class_n2,differ(ce,non_ce,nobatch2_log))
+      class_n3=cbind(class_n3,differ(ce,non_ce,nobatch3_log))
+      
+      class_a1=c()
+      class_a2=c()
+      class_a3=c()
+      class_a1=cbind(class_a1,differ(ce,non_ce,data1_log))
+      class_a2=cbind(class_a2,differ(ce,non_ce,data2_log))
+      class_a3=cbind(class_a3,differ(ce,non_ce,data3_log))
+      
+      class_bc1=c()
+      sva_both=bc.data1[[8]]
+      sva_ce_only=bc.data1[[9]]
+      sva_be_only=bc.data1[[10]]
+      sva_none=bc.data1[[11]]
+      sva_ce=union(sva_ce_only,sva_both)
+      sva_non_ce=setdiff(union(sva_be_only,union(sva_both,sva_none)),sva_ce)
+      for(i in 1:6)
+      {
+        class_bc1=cbind(class_bc1,differ(ce,non_ce,bc.data1[[i]]))
+      }
+      class_bc1=cbind(class_bc1,differ(sva_ce,sva_non_ce,bc.data1[[7]]))
+      
+      class_bc2=c()
+      sva_both=bc.data2[[8]]
+      sva_ce_only=bc.data2[[9]]
+      sva_be_only=bc.data2[[10]]
+      sva_none=bc.data2[[11]]
+      sva_ce=union(sva_ce_only,sva_both)
+      sva_non_ce=setdiff(union(sva_be_only,union(sva_both,sva_none)),sva_ce)
+      for(i in 1:6)
+      {
+        class_bc2=cbind(class_bc2,differ(ce,non_ce,bc.data2[[i]]))
+      }
+      class_bc2=cbind(class_bc2,differ(sva_ce,sva_non_ce,bc.data2[[7]]))
+      
+      class_bc3=c()
+      sva_both=bc.data3[[8]]
+      sva_ce_only=bc.data3[[9]]
+      sva_be_only=bc.data3[[10]]
+      sva_none=bc.data3[[11]]
+      sva_ce=union(sva_ce_only,sva_both)
+      sva_non_ce=setdiff(union(sva_be_only,union(sva_both,sva_none)),sva_ce)
+      for(i in 1:6)
+      {
+        class_bc3=cbind(class_bc3,differ(ce,non_ce,bc.data3[[i]]))
+      }
+      class_bc3=cbind(class_bc3,differ(sva_ce,sva_non_ce,bc.data3[[7]]))
+      all_class_n1=rbind(all_class_n1,class_n1)
+      all_class_n2=rbind(all_class_n2,class_n2)
+      all_class_n3=rbind(all_class_n3,class_n3)
+      all_class_a1=rbind(all_class_a1,class_a1)
+      all_class_a2=rbind(all_class_a2,class_a2)
+      all_class_a3=rbind(all_class_a3,class_a3)
+      all_class_bc1=rbind(all_class_bc1,class_bc1)
+      all_class_bc2=rbind(all_class_bc2,class_bc2)
+      all_class_bc3=rbind(all_class_bc3,class_bc3)
+    }
+    colnames(all_class_bc1)=c("Combat","Combat(cov)","CS-ComBat","Ratio A","Ratio G","BMC","SVA")
+    
+    all_class_n1_mean=c()
+    all_class_n2_mean=c()
+    all_class_n3_mean=c()
+    all_class_a1_mean=c()
+    all_class_a2_mean=c()
+    all_class_a3_mean=c()
+    all_class_bc1_mean=c()
+    all_class_bc2_mean=c()
+    all_class_bc3_mean=c()
+    
+    all_class_n1_df <- lapply(all_class_n1, as.data.frame)
+    all_class_n2_df <- lapply(all_class_n2, as.data.frame)
+    all_class_n3_df <- lapply(all_class_n3, as.data.frame)
+    all_class_a1_df <- lapply(all_class_a1, as.data.frame)
+    all_class_a2_df <- lapply(all_class_a2, as.data.frame)
+    all_class_a3_df <- lapply(all_class_a3, as.data.frame)
+    
+    all_class_n1_df <- do.call(rbind, all_class_n1_df)
+    all_class_n2_df <- do.call(rbind, all_class_n2_df)
+    all_class_n3_df <- do.call(rbind, all_class_n3_df)
+    all_class_a1_df <- do.call(rbind, all_class_a1_df)
+    all_class_a2_df <- do.call(rbind, all_class_a2_df)
+    all_class_a3_df <- do.call(rbind, all_class_a3_df)
+    
+    all_class_bc1_df <- lapply(all_class_bc1, as.data.frame)
+    all_class_bc2_df <- lapply(all_class_bc2, as.data.frame)
+    all_class_bc3_df <- lapply(all_class_bc3, as.data.frame)
+    
+    all_class_bc1_df <- t(do.call(rbind, all_class_bc1))
+    all_class_bc2_df <- t(do.call(rbind, all_class_bc2_df))
+    all_class_bc3_df <- t(do.call(rbind, all_class_bc3_df))
+    
+    vec <- c()
+    for(i in 1:100) 
+    { 
+      vec <- c(vec, 1 + 7*(i-1)) 
+    }
+    for(i in 1:7)
+    {
+      tmpp=sum(all_class_n1_df[vec+i-1, ])
+      all_class_n1_mean=rbind(all_class_n1_mean,tmpp/100)
+    }
+    for(i in 1:7)
+    {
+      tmpp=sum(all_class_n2_df[vec+i-1, ])
+      all_class_n2_mean=rbind(all_class_n2_mean,tmpp/100)
+    }
+    for(i in 1:7)
+    {
+      tmpp=sum(all_class_n3_df[vec+i-1, ])
+      all_class_n3_mean=rbind(all_class_n3_mean,tmpp/100)
+    }
+    for(i in 1:7)
+    {
+      tmpp=sum(all_class_a1_df[vec+i-1, ])
+      all_class_a1_mean=rbind(all_class_a1_mean,tmpp/100)
+    }
+    for(i in 1:7)
+    {
+      tmpp=sum(all_class_a2_df[vec+i-1, ])
+      all_class_a2_mean=rbind(all_class_a2_mean,tmpp/100)
+    }
+    for(i in 1:7)
+    {
+      tmpp=sum(all_class_a3_df[vec+i-1, ])
+      all_class_a3_mean=rbind(all_class_a3_mean,tmpp/100)
+    }
+    for(i in 1:7)
+    {
+      testlis=as.data.frame(all_class_bc1[vec+i-1, ])
+      tmpp=lapply(testlis, as.data.frame)
+      onemean=c()
+      for(j in 1:7)
+      {
+        onemean=cbind(onemean,sum(tmpp[[j]])/100)
+      }
+      all_class_bc1_mean=rbind(all_class_bc1_mean,onemean)
+    }
+    for(i in 1:7)
+    {
+      testlis=as.data.frame(all_class_bc2[vec+i-1, ])
+      tmpp=lapply(testlis, as.data.frame)
+      onemean=c()
+      for(j in 1:7)
+      {
+        onemean=cbind(onemean,sum(tmpp[[j]])/100)
+      }
+      all_class_bc2_mean=rbind(all_class_bc2_mean,onemean)
+    }
+    for(i in 1:7)
+    {
+      testlis=as.data.frame(all_class_bc3[vec+i-1, ])
+      tmpp=lapply(testlis, as.data.frame)
+      onemean=c()
+      for(j in 1:7)
+      {
+        onemean=cbind(onemean,sum(tmpp[[j]])/100)
+      }
+      all_class_bc3_mean=rbind(all_class_bc3_mean,onemean)
+      
+    }
+    all_class_n1_mean=as.data.frame(all_class_n1_mean)
+    all_class_n2_mean=as.data.frame(all_class_n2_mean)
+    all_class_n3_mean=as.data.frame(all_class_n3_mean)
+    all_class_a1_mean=as.data.frame(all_class_a1_mean)
+    all_class_a2_mean=as.data.frame(all_class_a2_mean)
+    all_class_a3_mean=as.data.frame(all_class_a3_mean)
+    
+    all_data1=c()
+    all_data1 <- cbind(all_class_n1_mean,cbind(all_class_n2_mean,all_class_n3_mean))
+    all_data1 <-rbind(all_data1,cbind(all_class_a1_mean,cbind(all_class_a2_mean,all_class_a3_mean)))
+    colnames(all_data1)=c(1:3)
+    all_data1$metric=rep(c("TP",'FP','TN','FN','precision','recall','F1') ,2)
+    all_data1$classtype=c(rep("no_batch",7),rep("batch",7))
+    
+    all_data2=c()
+    all_class_bc1_mean=as.data.frame(all_class_bc1_mean)
+    all_class_bc2_mean=as.data.frame(all_class_bc2_mean)
+    all_class_bc3_mean=as.data.frame(all_class_bc3_mean)
+    all_data2 <-rbind(all_data2,rbind(all_class_bc1_mean,rbind(all_class_bc2_mean,all_class_bc3_mean)))
+    colnames(all_data2)=c("Combat","Combat(cov)","CS-ComBat","Ratio A","Ratio G","BMC","SVA")
+    all_data2$metric=rep(c("TP",'FP','TN','FN','precision','recall','F1') ,3)
+    all_data2$data=c(rep(1,7),rep(2,7),rep(3,7))
+    all_data=list()
+    length=2
+    all_data[[1]]=all_data1
+    all_data[[2]]=all_data2
+    write.xlsx(all_data,paste0("differnew",CEP,"_",BEP,"_after_pr.xlsx"))
+  }}
+
+```
+
